@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#10161c" />
+  <title>TRUCK CITY - Fase 1</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Canvas do Phaser entra aqui -->
+  <div id="game-container"></div>
+
+  <!-- TELA DE CONFIGURAÇÃO INICIAL -->
+  <div id="setup">
+    <div id="step-device" class="panel">
+      <h1>TRUCK CITY</h1>
+      <p class="question">Você está jogando no PC ou Celular?</p>
+      <button class="big" data-device="pc">PC</button>
+      <button class="big" data-device="mobile">Celular</button>
+    </div>
+
+    <div id="step-mobile" class="panel hidden">
+      <h1>TRUCK CITY</h1>
+      <p class="question">Como prefere dirigir o caminhão?</p>
+      <button class="big" data-mode="buttons">Botões direcionais na tela</button>
+      <button class="big" data-mode="wheel">Volante virtual + Pedais</button>
+      <button class="ghost" id="btn-back">&larr; Voltar</button>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-box">
+      <div><b id="hud-speed">0</b> km/h &nbsp;<span id="hud-gear">N</span></div>
+      <div>Volante: <span id="hud-steer">0&deg;</span></div>
+      <div id="hud-status"></div>
+      <div id="hud-help"></div>
+    </div>
+    <div id="hud-msg"></div>
+  </div>
+
+  <!-- CONTROLES MOBILE -->
+  <div id="controls" class="hidden">
+
+    <!-- Opção A: botões direcionais -->
+    <div id="dpad">
+      <button class="ctl" data-hold="up">&#9650;</button>
+      <button class="ctl" data-hold="left">&#9664;</button>
+      <button class="ctl" data-hold="right">&#9654;</button>
+      <button class="ctl" data-hold="down">&#9660;</button>
+    </div>
+
+    <!-- Opção B: volante (esquerda) + pedais (direita) -->
+    <div id="wheel-wrap">
+      <div id="wheel">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="42" fill="rgba(0,0,0,.35)" stroke="#e6e6e6" stroke-width="8"/>
+          <circle cx="50" cy="50" r="10" fill="#e6e6e6"/>
+          <line x1="8"  y1="50" x2="40" y2="50" stroke="#e6e6e6" stroke-width="7"/>
+          <line x1="60" y1="50" x2="92" y2="50" stroke="#e6e6e6" stroke-width="7"/>
+          <line x1="50" y1="60" x2="50" y2="92" stroke="#e6e6e6" stroke-width="7"/>
+          <rect x="46" y="3" width="8" height="12" fill="#ffd400"/>
+        </svg>
+      </div>
+    </div>
+
+    <div id="pedals">
+      <button class="ctl pedal" id="pedal-brake" data-hold="brake">FREIO<br />/ R&Eacute;</button>
+      <button class="ctl pedal" id="pedal-gas" data-hold="gas">ACEL.</button>
+    </div>
+
+    <!-- Botão contextual Entrar / Sair -->
+    <button id="btn-enter" class="ctl">Sair do caminh&atilde;o</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="js/controls.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
