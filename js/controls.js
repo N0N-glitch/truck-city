@@ -1,7 +1,7 @@
 /* ============================================================
-   TRUCK CITY - controls.js
-   Setup de dispositivo, HUD e controles mobile (HTML).
-   Expõe tudo em window.TC para o game.js usar.
+   TRUCK CITY - controls.js  (Fase 2)
+   Setup de dispositivo, HUD, botão contextual e controles mobile.
+   Expõe tudo em window.TC para o game.js e o pc.js usarem.
    ============================================================ */
 (function () {
   'use strict';
@@ -16,7 +16,7 @@
       up: 0, down: 0, left: 0, right: 0, // botões direcionais
       gas: 0, brake: 0,                  // pedais
       wheel: 0,                          // volante: -1 (esquerda) a 1 (direita)
-      action: false,                     // botão Entrar/Sair
+      action: false,                     // botão contextual pressionado
     },
     ui: {},
     startGame: function () { console.error('game.js não foi carregado.'); },
@@ -33,16 +33,15 @@
     stepDevice: $('#step-device'),
     stepMobile: $('#step-mobile'),
     hud: $('#hud'),
-    speed: $('#hud-speed'),
-    gear: $('#hud-gear'),
-    steer: $('#hud-steer'),
+    line: $('#hud-line'),
     status: $('#hud-status'),
     help: $('#hud-help'),
     msg: $('#hud-msg'),
     controls: $('#controls'),
     wheelWrap: $('#wheel-wrap'),
     wheel: $('#wheel'),
-    enter: $('#btn-enter'),
+    action: $('#btn-action'),
+    actionLabel: $('#action-label'),
   };
 
   document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -72,15 +71,16 @@
     TC.device = device;
     TC.mobileMode = mode;
 
+    document.body.classList.add(device === 'mobile' ? 'is-mobile' : 'is-pc');
     el.setup.classList.add('hidden');
     el.hud.classList.remove('hidden');
 
     if (device === 'mobile') {
       el.controls.classList.remove('hidden');
       el.controls.classList.add('mode-' + mode);
-      el.help.textContent = 'Toque no mapa para andar até o ponto.';
+      el.help.textContent = 'Toque no mapa para andar. Aproxime-se de portas e objetos para interagir.';
     } else {
-      el.help.textContent = 'WASD/Setas: andar e dirigir · E ou Espaço: entrar/sair · Clique: andar até o ponto';
+      el.help.textContent = 'WASD/Setas: andar e dirigir · E ou Espaço: interagir · Clique: andar até o ponto';
     }
 
     TC.startGame();
@@ -105,8 +105,8 @@
 
   document.querySelectorAll('[data-hold]').forEach((btn) => bindHold(btn, btn.dataset.hold));
 
-  /* ---------------- BOTÃO ENTRAR / SAIR ---------------- */
-  el.enter.addEventListener('pointerdown', (e) => {
+  /* ---------------- BOTÃO CONTEXTUAL ---------------- */
+  el.action.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     TC.input.action = true;
   });
@@ -157,10 +157,9 @@
     }
   }
 
-  TC.ui.setHud = function (kmh, gear, steerDeg, status) {
-    setText('speed', el.speed, String(kmh));
-    setText('gear', el.gear, gear);
-    setText('steer', el.steer, steerDeg + '\u00B0');
+  // Linha principal do HUD + linha de status (ex.: "ESTACIONADO: ZONA DE CARGA")
+  TC.ui.setHud = function (line, status) {
+    setText('line', el.line, line);
     setText('status', el.status, status || '');
   };
 
@@ -172,28 +171,44 @@
     flashTimer = setTimeout(() => el.msg.classList.remove('show'), ms || 2200);
   };
 
-  TC.ui.setEnterButton = function (label, enabled) {
-    setText('enterLabel', el.enter, label);
-    if (cache.enterEnabled !== enabled) {
-      cache.enterEnabled = enabled;
-      el.enter.classList.toggle('disabled', !enabled);
+  // info = null (esconde) ou { label, x, y } com x/y em pixels de tela
+  TC.ui.setAction = function (info) {
+    if (!info) {
+      if (cache.actionOn) {
+        el.action.classList.remove('show');
+        cache.actionOn = false;
+      }
+      return;
+    }
+    setText('actionLabel', el.actionLabel, info.label);
+    const x = Math.round(info.x);
+    const y = Math.round(info.y);
+    if (cache.ax !== x) { cache.ax = x; el.action.style.left = x + 'px'; }
+    if (cache.ay !== y) { cache.ay = y; el.action.style.top = y + 'px'; }
+    if (!cache.actionOn) {
+      el.action.classList.add('show');
+      cache.actionOn = true;
     }
   };
 
-  TC.ui.setDriving = function (driving) {
-    el.controls.classList.toggle('is-driving', driving);
-    // zera tudo ao trocar de modo para não ficar tecla "presa"
+  // Zera tudo para não ficar tecla/botão "preso" ao trocar de modo
+  TC.ui.resetInputs = function () {
     Object.keys(TC.input).forEach((k) => { if (k !== 'action') TC.input[k] = 0; });
     document.querySelectorAll('[data-hold]').forEach((b) => b.classList.remove('active'));
     wheel.held = false;
     wheel.angle = 0;
   };
 
+  TC.ui.setDriving = function (driving) {
+    el.controls.classList.toggle('is-driving', driving);
+    TC.ui.resetInputs();
+  };
+
   // Chamado todo frame pelo jogo: volta o volante ao centro e gira o desenho
   TC.ui.update = function (dt) {
     if (TC.mobileMode !== 'wheel') return;
     if (!wheel.held && wheel.angle !== 0) {
-      const step = 5 * dt; // velocidade com que o volante volta ao centro
+      const step = 5 * dt;
       wheel.angle = Math.abs(wheel.angle) <= step ? 0 : wheel.angle - Math.sign(wheel.angle) * step;
     }
     TC.input.wheel = wheel.angle / WHEEL_MAX;
