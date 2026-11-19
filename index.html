@@ -4,8 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#10161c" />
-  <title>TRUCK CITY - Fase 1</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <title>TRUCK CITY - Fase 2</title>
+  <!-- ?v=2 evita que o GitHub Pages/navegador sirva arquivos antigos do cache -->
+  <link rel="stylesheet" href="css/style.css?v=2" />
 </head>
 <body>
 
@@ -30,16 +31,20 @@
     </div>
   </div>
 
-  <!-- HUD -->
+  <!-- HUD compacto -->
   <div id="hud" class="hidden">
     <div id="hud-box">
-      <div><b id="hud-speed">0</b> km/h &nbsp;<span id="hud-gear">N</span></div>
-      <div>Volante: <span id="hud-steer">0&deg;</span></div>
+      <div id="hud-line">A pé</div>
       <div id="hud-status"></div>
       <div id="hud-help"></div>
     </div>
     <div id="hud-msg"></div>
   </div>
+
+  <!-- BOTÃO CONTEXTUAL (oculto por padrão; só aparece perto de algo interativo) -->
+  <button id="btn-action" type="button">
+    <span id="action-label"></span><span class="key">E</span>
+  </button>
 
   <!-- CONTROLES MOBILE -->
   <div id="controls" class="hidden">
@@ -56,7 +61,7 @@
     <div id="wheel-wrap">
       <div id="wheel">
         <svg viewBox="0 0 100 100" aria-hidden="true">
-          <circle cx="50" cy="50" r="42" fill="rgba(0,0,0,.35)" stroke="#e6e6e6" stroke-width="8"/>
+          <circle cx="50" cy="50" r="42" fill="rgba(0,0,0,.30)" stroke="#e6e6e6" stroke-width="8"/>
           <circle cx="50" cy="50" r="10" fill="#e6e6e6"/>
           <line x1="8"  y1="50" x2="40" y2="50" stroke="#e6e6e6" stroke-width="7"/>
           <line x1="60" y1="50" x2="92" y2="50" stroke="#e6e6e6" stroke-width="7"/>
@@ -70,13 +75,55 @@
       <button class="ctl pedal" id="pedal-brake" data-hold="brake">FREIO<br />/ R&Eacute;</button>
       <button class="ctl pedal" id="pedal-gas" data-hold="gas">ACEL.</button>
     </div>
+  </div>
 
-    <!-- Botão contextual Entrar / Sair -->
-    <button id="btn-enter" class="ctl">Sair do caminh&atilde;o</button>
+  <!-- COMPUTADOR DO ESCRITÓRIO (sistema de gerenciamento) -->
+  <div id="pc-ui" class="hidden" role="dialog" aria-label="Computador do escritório">
+    <div id="pc-window">
+      <div id="pc-titlebar">
+        <button id="pc-back" class="pc-btn hidden">&larr; Início</button>
+        <span id="pc-title">TruckOS</span>
+        <button id="pc-close" class="pc-btn">&#10005; Fechar</button>
+      </div>
+
+      <div id="pc-body">
+        <!-- Área de trabalho -->
+        <div id="pc-home">
+          <button class="app-icon" data-app="contracts">
+            <span class="ico">&#128196;</span>
+            <span class="name">Contratos</span>
+            <span class="badge" id="badge-contracts">0</span>
+          </button>
+          <button class="app-icon" data-app="stock">
+            <span class="ico">&#128230;</span>
+            <span class="name">Estoque</span>
+            <span class="badge warn hidden" id="badge-stock">0</span>
+          </button>
+        </div>
+
+        <!-- App: Contratos -->
+        <section id="app-contracts" class="app hidden">
+          <div class="tabs">
+            <button class="tab active" data-tab="available">Disponíveis</button>
+            <button class="tab" data-tab="active">Em andamento <span id="count-active">0</span></button>
+          </div>
+          <div id="contracts-list" class="grid"></div>
+        </section>
+
+        <!-- App: Estoque -->
+        <section id="app-stock" class="app hidden">
+          <div id="stock-summary" class="summary"></div>
+          <div id="stock-list" class="grid"></div>
+        </section>
+      </div>
+
+      <div id="pc-tray"></div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-  <script src="js/controls.js"></script>
-  <script src="js/game.js"></script>
+  <script src="js/controls.js?v=2"></script>
+  <script src="js/pc.js?v=2"></script>
+  <script src="js/game.js?v=2"></script>
 </body>
 </html>
