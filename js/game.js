@@ -1,8 +1,8 @@
 /* ============================================================
-   TRUCK CITY - game.js  (Fase 2)
+   TRUCK CITY - game.js  (Fase 2 + botão contextual fixo)
    Mantém TODA a lógica da Fase 1 (física Ackermann, controles,
    tap-to-move, entrar/sair do caminhão, câmera suave) e adiciona:
-   - botão contextual (só perto de objetos interativos)
+   - botão contextual (só perto de objetos interativos, posição fixa no CSS)
    - prédio do escritório + sala interna + computador
    - mapa polido (calçadas, faixas, grama, árvores)
    Convenção: heading 0 = apontando para a direita (+x), y cresce para baixo.
@@ -668,7 +668,7 @@
       this.scale.on('resize', this.applyZoom, this);
       this.applyZoom();
 
-      // Reposiciona o botão contextual depois que a câmera atualiza (menos "tremida")
+      // Liga/desliga o botão contextual após cada frame renderizado
       this.events.on(Phaser.Scenes.Events.RENDER, this.positionAction, this);
 
       TC.ui.setDriving(true);
@@ -1205,7 +1205,7 @@
 
       if (this.state === 'driving') {
         if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) return null; // em movimento: sem botão
-        return { id: 'truck-exit', label: 'Sair do Caminhão', ax: t.cx, ay: t.cy - 10 };
+        return { id: 'truck-exit', label: 'Sair do Caminhão' };
       }
 
       const cands = [];
@@ -1225,19 +1225,14 @@
         if (d <= c.r && d < bestD) { best = c; bestD = d; }
       });
       if (!best) return null;
-      return { id: best.id, label: best.label, ax: p.x, ay: p.y - 16 };
+      return { id: best.id, label: best.label };
     }
 
-    // Botão flutuante: converte a posição do mundo para a tela
+    // [UX] O botão contextual é FIXO no canto inferior direito (definido no CSS).
+    // Aqui só decidimos se ele aparece (perto de um objeto interativo) ou some.
     positionAction() {
       const it = this.interaction;
-      if (!it) { TC.ui.setAction(null); return; }
-      const cam = this.cameras.main;
-      let sx = (it.ax - cam.worldView.x) * cam.zoom;
-      let sy = (it.ay - cam.worldView.y) * cam.zoom;
-      sx = clamp(sx, 90, this.scale.width - 90);
-      sy = clamp(sy, 70, this.scale.height - 110);
-      TC.ui.setAction({ label: it.label, x: sx, y: sy });
+      TC.ui.setAction(it ? { label: it.label } : null);
     }
 
     handleAction() {
