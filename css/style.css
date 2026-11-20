@@ -129,26 +129,31 @@ button.ghost {
 }
 #hud-msg.show { opacity: 1; }
 
-/* ============ BOTÃO CONTEXTUAL FLUTUANTE ============ */
-/* Oculto por padrão (display:none). O jogo posiciona via left/top
-   e só adiciona a classe .show quando há algo para interagir por perto. */
+/* ============ BOTÃO CONTEXTUAL (FIXO, CANTO INFERIOR DIREITO) ============ */
+/* Oculto por padrão (display:none). O jogo só liga/desliga com a classe .show
+   quando o jogador está perto de algo interativo. A posição NÃO muda mais. */
 #btn-action {
   display: none;
   position: fixed;
   z-index: 30;
-  left: 0;
-  top: 0;
-  transform: translate(-50%, calc(-100% - 14px));
+  left: auto;
+  top: auto;
+  right: calc(14px + env(safe-area-inset-right));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  transform: none;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 10px 16px;
+  min-width: 170px;
+  min-height: 56px;
+  padding: 12px 20px;
   border-radius: 999px;
-  border: 1.5px solid rgba(255, 255, 255, 0.55);
-  background: rgba(18, 28, 40, 0.82);
+  border: 1.5px solid rgba(255, 255, 255, 0.6);
+  background: rgba(18, 28, 40, 0.86);
   backdrop-filter: blur(6px);
   color: #fff;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 16px;
   white-space: nowrap;
   touch-action: none;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(255, 212, 0, 0.25);
@@ -164,9 +169,14 @@ button.ghost {
 }
 .is-mobile #btn-action .key { display: none; }
 
+/* Modo volante dirigindo: sobe o botão para ficar ACIMA dos pedais (sem sobrepor) */
+body.mode-wheel.is-driving #btn-action {
+  bottom: calc(var(--pedal-h) + 32px + env(safe-area-inset-bottom));
+}
+
 @keyframes pop {
-  from { opacity: 0; transform: translate(-50%, calc(-100% - 4px)) scale(0.9); }
-  to   { opacity: 1; transform: translate(-50%, calc(-100% - 14px)) scale(1); }
+  from { opacity: 0; transform: translateY(8px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ============ CONTROLES MOBILE (translúcidos) ============ */
