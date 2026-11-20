@@ -1,5 +1,5 @@
 /* ============================================================
-   TRUCK CITY - controls.js  (Fase 2)
+   TRUCK CITY - controls.js  (Fase 2 + botão contextual fixo)
    Setup de dispositivo, HUD, botão contextual e controles mobile.
    Expõe tudo em window.TC para o game.js e o pc.js usarem.
    ============================================================ */
@@ -78,6 +78,7 @@
     if (device === 'mobile') {
       el.controls.classList.remove('hidden');
       el.controls.classList.add('mode-' + mode);
+      document.body.classList.add('mode-' + mode); // permite ao CSS posicionar o botão contextual
       el.help.textContent = 'Toque no mapa para andar. Aproxime-se de portas e objetos para interagir.';
     } else {
       el.help.textContent = 'WASD/Setas: andar e dirigir · E ou Espaço: interagir · Clique: andar até o ponto';
@@ -171,7 +172,7 @@
     flashTimer = setTimeout(() => el.msg.classList.remove('show'), ms || 2200);
   };
 
-  // info = null (esconde) ou { label, x, y } com x/y em pixels de tela
+  // info = null (esconde) ou { label } (mostra). A posição é fixa e definida só pelo CSS.
   TC.ui.setAction = function (info) {
     if (!info) {
       if (cache.actionOn) {
@@ -181,10 +182,6 @@
       return;
     }
     setText('actionLabel', el.actionLabel, info.label);
-    const x = Math.round(info.x);
-    const y = Math.round(info.y);
-    if (cache.ax !== x) { cache.ax = x; el.action.style.left = x + 'px'; }
-    if (cache.ay !== y) { cache.ay = y; el.action.style.top = y + 'px'; }
     if (!cache.actionOn) {
       el.action.classList.add('show');
       cache.actionOn = true;
@@ -201,6 +198,7 @@
 
   TC.ui.setDriving = function (driving) {
     el.controls.classList.toggle('is-driving', driving);
+    document.body.classList.toggle('is-driving', driving); // usado pelo CSS do botão contextual
     TC.ui.resetInputs();
   };
 
