@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#10161c" />
-  <title>TRUCK CITY - Fase 2</title>
-  <!-- ?v=2 evita que o GitHub Pages/navegador sirva arquivos antigos do cache -->
-  <link rel="stylesheet" href="css/style.css?v=2" />
+  <title>TRUCK CITY - Fase 3</title>
+  <!-- ?v=3 evita que o GitHub Pages/navegador sirva arquivos antigos do cache -->
+  <link rel="stylesheet" href="css/style.css?v=3" />
 </head>
 <body>
 
@@ -31,17 +31,44 @@
     </div>
   </div>
 
-  <!-- HUD compacto -->
+  <!-- HUD -->
   <div id="hud" class="hidden">
     <div id="hud-box">
+      <div id="hud-money"><span class="coin">$</span><b id="money-val">0</b></div>
       <div id="hud-line">A pé</div>
       <div id="hud-status"></div>
       <div id="hud-help"></div>
     </div>
+
+    <!-- Painel da missão (canto superior direito) -->
+    <div id="mission-box" class="hidden">
+      <div class="m-head"><span class="m-tag">MISS&Atilde;O</span><span id="m-time" class="m-time"></span></div>
+      <div id="m-title"></div>
+      <div id="m-step"></div>
+      <div id="m-prog" class="hidden">
+        <div class="bar"><i id="m-prog-bar"></i></div>
+        <span id="m-prog-label"></span>
+      </div>
+      <div id="m-nav" class="hidden">
+        <svg id="nav-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 12h14M13 6l6 6-6 6"/>
+        </svg>
+        <span id="nav-dist"></span>
+      </div>
+    </div>
+
     <div id="hud-msg"></div>
+
+    <div id="banner">
+      <div id="banner-title"></div>
+      <div id="banner-sub"></div>
+    </div>
+
+    <!-- Resumo de entrega -->
+    <div id="summary" class="hidden"></div>
   </div>
 
-  <!-- BOTÃO CONTEXTUAL (oculto por padrão; só aparece perto de algo interativo) -->
+  <!-- BOTÃO CONTEXTUAL (oculto por padrão; fixo no canto inferior direito) -->
   <button id="btn-action" type="button">
     <span id="action-label"></span><span class="key">E</span>
   </button>
@@ -77,53 +104,64 @@
     </div>
   </div>
 
-  <!-- COMPUTADOR DO ESCRITÓRIO (sistema de gerenciamento) -->
-  <div id="pc-ui" class="hidden" role="dialog" aria-label="Computador do escritório">
-    <div id="pc-window">
-      <div id="pc-titlebar">
-        <button id="pc-back" class="pc-btn hidden">&larr; Início</button>
-        <span id="pc-title">TruckOS</span>
-        <button id="pc-close" class="pc-btn">&#10005; Fechar</button>
-      </div>
-
-      <div id="pc-body">
-        <!-- Área de trabalho -->
-        <div id="pc-home">
-          <button class="app-icon" data-app="contracts">
-            <span class="ico">&#128196;</span>
-            <span class="name">Contratos</span>
-            <span class="badge" id="badge-contracts">0</span>
-          </button>
-          <button class="app-icon" data-app="stock">
-            <span class="ico">&#128230;</span>
-            <span class="name">Estoque</span>
-            <span class="badge warn hidden" id="badge-stock">0</span>
-          </button>
+  <!-- COMPUTADOR DA TRANSPORTADORA (TruckOS) -->
+  <div id="pc-ui" class="hidden" role="dialog" aria-label="Computador da transportadora">
+    <div id="os">
+      <div id="os-top">
+        <div class="os-brand">
+          <span class="os-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6.5h11V16H2z"/><path d="M13 9.5h4l3 3.2V16h-7z"/><circle cx="6.5" cy="17.5" r="2"/><circle cx="16.5" cy="17.5" r="2"/></svg>
+          </span>
+          <b>TruckOS</b>
+          <span id="os-company"></span>
         </div>
-
-        <!-- App: Contratos -->
-        <section id="app-contracts" class="app hidden">
-          <div class="tabs">
-            <button class="tab active" data-tab="available">Disponíveis</button>
-            <button class="tab" data-tab="active">Em andamento <span id="count-active">0</span></button>
-          </div>
-          <div id="contracts-list" class="grid"></div>
-        </section>
-
-        <!-- App: Estoque -->
-        <section id="app-stock" class="app hidden">
-          <div id="stock-summary" class="summary"></div>
-          <div id="stock-list" class="grid"></div>
-        </section>
+        <div class="os-tray">
+          <span id="os-money" class="chip"></span>
+          <span id="os-clock" class="chip"></span>
+        </div>
       </div>
 
-      <div id="pc-tray"></div>
+      <div id="os-desktop">
+        <div id="os-icons"></div>
+        <aside id="os-widgets"></aside>
+      </div>
+
+      <section id="os-window" class="hidden">
+        <header id="win-bar">
+          <span id="win-ico"></span>
+          <span id="win-title"></span>
+          <button id="win-close" class="win-btn" data-act="desktop" aria-label="Fechar janela">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </header>
+        <div id="win-body"></div>
+      </section>
+
+      <div id="os-toast"></div>
+
+      <footer id="os-dock">
+        <button class="dock-btn" data-act="desktop" title="Área de trabalho">
+          <span class="tile tone-slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+          </span>
+          <span class="dlbl">Desktop</span>
+        </button>
+        <div id="dock-apps"></div>
+        <button class="dock-btn power" data-act="power" title="Desligar e voltar ao jogo">
+          <span class="tile tone-red">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v9"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/></svg>
+          </span>
+          <span class="dlbl">Sair</span>
+        </button>
+      </footer>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-  <script src="js/controls.js?v=2"></script>
-  <script src="js/pc.js?v=2"></script>
-  <script src="js/game.js?v=2"></script>
+  <script src="js/controls.js?v=3"></script>
+  <script src="js/store.js?v=3"></script>
+  <script src="js/art.js?v=3"></script>
+  <script src="js/pc.js?v=3"></script>
+  <script src="js/game.js?v=3"></script>
 </body>
 </html>
