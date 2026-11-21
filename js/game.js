@@ -1,20 +1,21 @@
 /* ============================================================
-   TRUCK CITY - game.js  (Fase 2 + botão contextual fixo)
-   Mantém TODA a lógica da Fase 1 (física Ackermann, controles,
-   tap-to-move, entrar/sair do caminhão, câmera suave) e adiciona:
-   - botão contextual (só perto de objetos interativos, posição fixa no CSS)
-   - prédio do escritório + sala interna + computador
-   - mapa polido (calçadas, faixas, grama, árvores)
+   TRUCK CITY - game.js  (Fase 3)
+   Mantém a lógica da Fase 1/2 (física Ackermann, controles, tap-to-move,
+   entrar/sair do caminhão, escritório, botão contextual fixo) e adiciona:
+   - mundo segmentado com teleporte automático (Cidade <-> BR-116 <-> Distrito)
+   - missões de entrega com economia (carregar, transportar, descarregar, receber)
+   - colisão com dano, upgrades e pintura vindos do computador (TC.store)
    Convenção: heading 0 = apontando para a direita (+x), y cresce para baixo.
    ============================================================ */
 (function () {
   'use strict';
 
   const TC = window.TC;
+  const CFG = TC.cfg;
+  const ART = TC.art;
+  const STORE = TC.store;
 
   /* ================= CONFIGURAÇÃO (ajuste aqui) ================= */
-  const WORLD = { w: 2000, h: 2000 };
-  const SIDEWALK = 36;
 
   // Desligue aqui se a colisão atrapalhar algum teste (não afeta a física)
   const COLLISIONS = { truck: true, player: true };
@@ -27,7 +28,7 @@
     rearToCenter: 45,
     door: { x: 40, y: -27 },
 
-    // Dinâmica (pixels e segundos)
+    // Dinâmica (pixels e segundos) - os upgrades multiplicam estes valores
     maxFwd: 280,
     maxRev: 90,
     accel: 110,
@@ -49,64 +50,61 @@
 
   const PLAYER = { radius: 11, speed: 150, enterDist: 70 };
 
-  const ROADS = [
-    { x: 0,    y: 900, w: 2000, h: 200 },
-    { x: 900,  y: 0,   w: 200,  h: 2000 },
-    { x: 0,    y: 300, w: 2000, h: 160 },
-    { x: 1600, y: 0,   w: 160,  h: 2000 },
-  ];
+  const DWELL_TIME = 2;   // segundos parado na zona para carregar/descarregar
+  const ZONE_TOL = 10;    // tolerância (px) ao estacionar na zona
 
-  const ZONES = {
-    cargo: { x: 1180, y: 1110, w: 300, h: 170, color: 0xffd400, label: 'ZONA DE CARGA' },
-    work:  { x: 180,  y: 720,  w: 300, h: 170, color: 0x2f7df6, label: 'ZONA DE OBRA' },
+  /* ----- Segmentos do mundo (ficam em regiões distantes da mesma cena) ----- */
+  const SEGMENTS = {
+    city:     { id: 'city',     name: 'TRUCK CITY',          sub: 'Centro da cidade',                      ox: 0,    oy: 0, w: CFG.city.w,     h: CFG.city.h,     padX: 0,   padY: 0 },
+    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia · sentido Distrito Industrial', ox: 4000, oy: 0, w: CFG.br.w,       h: CFG.br.h,       padX: 800, padY: 0 },
+    district: { id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística',                        ox: 8000, oy: 0, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400 },
   };
 
-  /* ----- Escritório (exterior) ----- */
-  const OFFICE = { x: 1170, y: 520, w: 360, h: 250 };
+  /* ----- Portais de teleporte (coordenadas LOCAIS do segmento) -----
+     edge: borda onde fica o portal (N/S/E/W); min..max: trecho da borda (a rua);
+     arrive: posição de chegada no segmento destino; spread: quanto a posição lateral é preservada. */
+  const PORTALS = [
+    { seg: 'city',     edge: 'S', min: 900,  max: 1100, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
+    { seg: 'city',     edge: 'S', min: 1600, max: 1760, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
+    { seg: 'br',       edge: 'N', min: 344,  max: 856,  to: 'city',     arrive: { x: 1050, y: 1830, axis: 'x' }, spread: 40 },
+    { seg: 'br',       edge: 'S', min: 344,  max: 856,  to: 'district', arrive: { x: 750,  y: 170,  axis: 'x' }, spread: 40 },
+    { seg: 'district', edge: 'N', min: 700,  max: 900,  to: 'br',       arrive: { x: 696,  y: 4630, axis: 'x' }, spread: 50 },
+  ];
+
+  /* ----- Zonas de carga/entrega (coordenadas absolutas do mundo) ----- */
+  const ZONES = {
+    cargo:     { seg: 'city',     x: 1180,                         y: 1110, w: 300, h: 170, color: 0xffd400, label: 'ZONA DE CARGA' },
+    work:      { seg: 'city',     x: 180,                          y: 720,  w: 300, h: 170, color: 0x2f7df6, label: 'ZONA DE OBRA' },
+    warehouse: { seg: 'district', x: SEGMENTS.district.ox + 200,   y: 720,  w: 300, h: 170, color: 0xff8a3d, label: 'ARMAZÉM CENTRAL' },
+    port:      { seg: 'district', x: SEGMENTS.district.ox + 1000,  y: 720,  w: 300, h: 170, color: 0x1abc9c, label: 'PORTO SECO' },
+  };
+  const ZONE_KEYS = Object.keys(ZONES);
+
+  /* ----- Escritório e sala interna ----- */
+  const OFFICE = CFG.office;
   const OFFICE_DOOR = { x: 1350, y: 792, r: 72 };   // ponto de interação em frente à porta
   const OFFICE_EXIT = { x: 1350, y: 812 };           // onde o jogador aparece ao sair
-  const HEDGES = [
-    { x: 1140, y: 540, w: 22, h: 210 },
-    { x: 1538, y: 540, w: 22, h: 210 },
-  ];
 
-  const TREES = [
-    // bloco superior esquerdo
-    [120, 120], [310, 80], [520, 150], [730, 100], [210, 205],
-    // bloco esquerdo do meio
-    [110, 570], [300, 620], [520, 560], [720, 640], [640, 790], [90, 790],
-    // bloco superior central
-    [1210, 100], [1370, 70], [1500, 160], [1290, 200], [1190, 220],
-    // inferior central
-    [1200, 1400], [1420, 1480], [1280, 1650], [1500, 1780], [1180, 1880], [1380, 1900],
-    // inferior esquerdo
-    [150, 1280], [400, 1400], [700, 1320], [260, 1650], [560, 1760], [800, 1600], [100, 1900], [460, 1940],
-    // faixa direita
-    [1880, 180], [1920, 640], [1860, 1000], [1900, 1300], [1850, 1700], [1930, 1900],
-    // praça do escritório
-    [1170, 835], [1530, 835],
-  ];
-
-  /* ----- Sala interna (fica longe do mapa, na mesma cena) ----- */
-  const ROOM = { x: 2400, y: 200, w: 800, h: 560 };
+  const ROOM = CFG.room;
   const ROOM_WALK = { x0: ROOM.x + 26, y0: ROOM.y + 100, x1: ROOM.x + ROOM.w - 26, y1: ROOM.y + ROOM.h - 26 };
   const ROOM_SPAWN = { x: ROOM.x + 400, y: ROOM.y + 440 };
   const ROOM_EXIT = { x: ROOM.x + 400, y: ROOM.y + 515, r: 64 };
   const ROOM_PC = { x: ROOM.x + 570, y: ROOM.y + 222, r: 76 };
 
+  const TREES = [
+    [120, 120], [310, 80], [520, 150], [730, 100], [210, 205],
+    [110, 570], [300, 620], [520, 560], [720, 640], [640, 790], [90, 790],
+    [1210, 100], [1370, 70], [1500, 160], [1290, 200], [1190, 220],
+    [1200, 1400], [1420, 1480], [1280, 1650], [1500, 1780], [1180, 1880], [1380, 1900],
+    [150, 1280], [400, 1400], [700, 1320], [260, 1650], [520, 1850], [800, 1600], [100, 1900], [460, 1940],
+    [1880, 180], [1920, 640], [1860, 1000], [1900, 1300], [1850, 1700], [1930, 1900],
+    [1170, 835], [1530, 835],
+  ];
+
   /* ================= HELPERS ================= */
   const clamp = Phaser.Math.Clamp;
   const lerp = (a, b, t) => a + (b - a) * t;
   const approach = (v, target, step) => (v < target ? Math.min(v + step, target) : Math.max(v - step, target));
-
-  function mulberry32(a) {
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
 
   // Converte um ponto local do caminhão para coordenadas do mundo
   function toWorld(t, lx, ly) {
@@ -115,523 +113,49 @@
     return { x: t.cx + lx * cos - ly * sin, y: t.cy + lx * sin + ly * cos };
   }
 
-  /* ================= DESENHO DAS TEXTURAS (rodam uma única vez) ================= */
-
-  // ---------- MAPA: grama, calçadas, ruas, faixas, praça, sebes ----------
-  function drawGround(g) {
-    const W = WORLD.w, H = WORLD.h, SW = SIDEWALK;
-    const rnd = mulberry32(42);
-
-    // Grama em xadrez suave + tufos
-    g.fillStyle(0x3b6e41, 1);
-    g.fillRect(0, 0, W, H);
-    g.fillStyle(0x376a3d, 1);
-    for (let gx = 0; gx < W; gx += 100) {
-      for (let gy = 0; gy < H; gy += 100) {
-        if (((gx + gy) / 100) % 2 === 0) g.fillRect(gx, gy, 100, 100);
-      }
-    }
-    for (let i = 0; i < 700; i++) {
-      g.fillStyle(rnd() < 0.5 ? 0x4b8650 : 0x2f5e35, 0.55);
-      g.fillRect(Math.floor(rnd() * W), Math.floor(rnd() * H), 3, 3);
-    }
-
-    // Calçadas (borda escura primeiro, depois o concreto claro)
-    g.fillStyle(0x8c877b, 1);
-    ROADS.forEach((r) => g.fillRect(r.x - SW - 3, r.y - SW - 3, r.w + 2 * (SW + 3), r.h + 2 * (SW + 3)));
-    g.fillStyle(0xbdb8ab, 1);
-    ROADS.forEach((r) => g.fillRect(r.x - SW, r.y - SW, r.w + 2 * SW, r.h + 2 * SW));
-
-    // Asfalto
-    g.fillStyle(0x33343b, 1);
-    ROADS.forEach((r) => g.fillRect(r.x, r.y, r.w, r.h));
-
-    const inOther = (px, py, idx) =>
-      ROADS.some((r, j) => j !== idx && px >= r.x - 6 && px <= r.x + r.w + 6 && py >= r.y - 6 && py <= r.y + r.h + 6);
-
-    // Linhas laterais (pula cruzamentos)
-    g.fillStyle(0xdedede, 0.7);
-    ROADS.forEach((r, i) => {
-      if (r.w > r.h) {
-        for (let x = 0; x < W; x += 20) {
-          if (inOther(x + 10, r.y + 10, i)) continue;
-          g.fillRect(x, r.y + 8, 20, 2);
-          g.fillRect(x, r.y + r.h - 10, 20, 2);
-        }
-      } else {
-        for (let y = 0; y < H; y += 20) {
-          if (inOther(r.x + 10, y + 10, i)) continue;
-          g.fillRect(r.x + 8, y, 2, 20);
-          g.fillRect(r.x + r.w - 10, y, 2, 20);
-        }
-      }
-    });
-
-    // Faixa central tracejada (pula cruzamentos)
-    g.fillStyle(0xe8d44d, 1);
-    ROADS.forEach((r, i) => {
-      if (r.w > r.h) {
-        const cy = r.y + r.h / 2;
-        for (let x = 0; x < W; x += 80) {
-          if (!inOther(x + 20, cy, i)) g.fillRect(x, cy - 2, 40, 4);
-        }
-      } else {
-        const cx = r.x + r.w / 2;
-        for (let y = 0; y < H; y += 80) {
-          if (!inOther(cx, y + 20, i)) g.fillRect(cx - 2, y, 4, 40);
-        }
-      }
-    });
-
-    // Faixas de pedestre nos cruzamentos
-    g.fillStyle(0xf2f2f2, 0.85);
-    const hRoads = ROADS.filter((r) => r.w > r.h);
-    const vRoads = ROADS.filter((r) => r.h > r.w);
-    hRoads.forEach((h) => vRoads.forEach((v) => {
-      for (let x = v.x + 12; x < v.x + v.w - 12; x += 24) {
-        g.fillRect(x, h.y - 30, 12, 20);
-        g.fillRect(x, h.y + h.h + 10, 12, 20);
-      }
-      for (let y = h.y + 12; y < h.y + h.h - 12; y += 24) {
-        g.fillRect(v.x - 30, y, 20, 12);
-        g.fillRect(v.x + v.w + 10, y, 20, 12);
-      }
-    }));
-
-    // Praça e caminho em frente ao escritório
-    g.fillStyle(0xc9c3b4, 1);
-    g.fillRect(1140, 770, 420, 96);
-    g.fillStyle(0xb2ac9d, 0.7);
-    for (let x = 1140; x <= 1560; x += 30) g.fillRect(x, 770, 1, 96);
-    for (let y = 770; y <= 866; y += 24) g.fillRect(1140, y, 420, 1);
-    g.fillStyle(0xe1dccd, 1);
-    g.fillRect(1316, 770, 68, 96);
-    g.lineStyle(2, 0xb2ac9d, 1);
-    g.strokeRect(1316, 770, 68, 96);
-
-    // Sebes
-    HEDGES.forEach((h) => {
-      g.fillStyle(0x24502a, 1);
-      g.fillRoundedRect(h.x, h.y, h.w, h.h, 8);
-      g.fillStyle(0x3a7a41, 1);
-      g.fillRoundedRect(h.x + 3, h.y + 3, h.w - 6, h.h - 6, 6);
-      g.fillStyle(0x4f9a56, 0.8);
-      for (let y = h.y + 10; y < h.y + h.h - 6; y += 18) g.fillCircle(h.x + h.w / 2, y, 4);
-    });
-
-    // Borda do mundo (faixa escura discreta)
-    g.fillStyle(0x1f3f25, 1);
-    g.fillRect(0, 0, W, 14);
-    g.fillRect(0, H - 14, W, 14);
-    g.fillRect(0, 0, 14, H);
-    g.fillRect(W - 14, 0, 14, H);
+  function fmtTime(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
-  // ---------- ESCRITÓRIO (visão de cima com fachada sul visível) ----------
-  // Textura 390x320. O prédio fica em (10,20) dentro dela.
-  function drawOfficeTexture(g) {
-    const bx = 10, by = 20, bw = OFFICE.w, bh = OFFICE.h, roofH = 170;
-
-    // sombra projetada
-    g.fillStyle(0x000000, 0.28);
-    g.fillRoundedRect(bx + 10, by + 12, bw, bh, 8);
-
-    // fachada (parede frontal) + rodapé
-    g.fillStyle(0xe9e0cb, 1);
-    g.fillRect(bx, by + roofH, bw, bh - roofH);
-    g.fillStyle(0xcdbf9f, 1);
-    g.fillRect(bx, by + bh - 8, bw, 8);
-
-    // telhado com platibanda
-    g.fillStyle(0x56677f, 1);
-    g.fillRoundedRect(bx, by, bw, roofH, 6);
-    g.lineStyle(5, 0x9fb0c6, 1);
-    g.strokeRoundedRect(bx + 2.5, by + 2.5, bw - 5, roofH - 5, 5);
-    g.lineStyle(1, 0x6b7d96, 0.9);
-    for (let x = bx + 30; x < bx + bw - 10; x += 30) g.lineBetween(x, by + 8, x, by + roofH - 8);
-
-    // beiral (sombra sob o telhado)
-    g.fillStyle(0x000000, 0.2);
-    g.fillRect(bx, by + roofH, bw, 7);
-
-    // aparelhos de ar-condicionado
-    [bx + 28, bx + bw - 88].forEach((ax) => {
-      g.fillStyle(0x000000, 0.2);
-      g.fillRect(ax + 4, by + 16, 60, 40);
-      g.fillStyle(0xcfd6df, 1);
-      g.fillRect(ax, by + 12, 60, 40);
-      g.lineStyle(2, 0x8c97a6, 1);
-      g.strokeRect(ax, by + 12, 60, 40);
-      g.fillStyle(0x5f6b7a, 1);
-      g.fillCircle(ax + 30, by + 32, 15);
-      g.fillStyle(0x3d4652, 1);
-      g.fillCircle(ax + 30, by + 32, 4);
-      g.lineStyle(2, 0x3d4652, 1);
-      g.lineBetween(ax + 15, by + 32, ax + 45, by + 32);
-      g.lineBetween(ax + 30, by + 17, ax + 30, by + 47);
-    });
-
-    // claraboias
-    [bx + 24, bx + bw - 80].forEach((sx) => {
-      g.fillStyle(0x2e3b4c, 1);
-      g.fillRect(sx, by + 112, 56, 42);
-      g.fillStyle(0x9fd6ee, 1);
-      g.fillRect(sx + 3, by + 115, 50, 36);
-      g.fillStyle(0xd6f1fb, 0.7);
-      g.fillTriangle(sx + 3, by + 115, sx + 34, by + 115, sx + 3, by + 146);
-      g.lineStyle(2, 0x2e3b4c, 1);
-      g.lineBetween(sx + 28, by + 115, sx + 28, by + 151);
-      g.lineBetween(sx + 3, by + 133, sx + 53, by + 133);
-    });
-
-    // janelas da fachada
-    const wy = by + 182;
-    [bx + 24, bx + 96, bx + bw - 74, bx + bw - 146].forEach((wx) => {
-      g.fillStyle(0x3b4a5c, 1);
-      g.fillRect(wx, wy, 50, 36);
-      g.fillStyle(0x7fb6d6, 1);
-      g.fillRect(wx + 3, wy + 3, 44, 30);
-      g.fillStyle(0xb9e0f2, 0.55);
-      g.fillTriangle(wx + 3, wy + 3, wx + 30, wy + 3, wx + 3, wy + 30);
-      g.lineStyle(2, 0x3b4a5c, 1);
-      g.lineBetween(wx + 25, wy + 3, wx + 25, wy + 33);
-      g.fillStyle(0xcfc3a5, 1);
-      g.fillRect(wx - 3, wy + 36, 56, 4);
-    });
-
-    // porta de entrada
-    const dx = bx + 158, dy = by + 196;
-    g.fillStyle(0x5b3a26, 1);
-    g.fillRect(dx, dy, 44, bh - 196 + 0);
-    g.fillStyle(0x9ed3e6, 0.95);
-    g.fillRect(dx + 6, dy + 8, 32, 34);
-    g.lineStyle(2, 0x5b3a26, 1);
-    g.lineBetween(dx + 22, dy + 8, dx + 22, dy + 42);
-    g.fillStyle(0xe0b341, 1);
-    g.fillRect(dx + 36, dy + 30, 4, 5);
-
-    // toldo listrado
-    const ax0 = bx + 140;
-    for (let i = 0; i < 8; i++) {
-      g.fillStyle(i % 2 ? 0xf4efe6 : 0xc0392b, 1);
-      g.fillRect(ax0 + i * 10, by + 176, 10, 20);
-    }
-    g.fillStyle(0x000000, 0.22);
-    g.fillRect(ax0, by + 196, 80, 6);
-
-    // degraus
-    g.fillStyle(0xd8d2c2, 1);
-    g.fillRect(bx + 130, by + bh, 100, 7);
-    g.fillStyle(0xcbc5b4, 1);
-    g.fillRect(bx + 122, by + bh + 7, 116, 7);
-
-    // vasos de flores ao lado da porta
-    [bx + 112, bx + 248].forEach((px) => {
-      g.fillStyle(0x8a4b2a, 1);
-      g.fillRect(px - 10, by + bh - 20, 20, 14);
-      g.fillStyle(0x2f8f4a, 1);
-      g.fillCircle(px, by + bh - 24, 10);
-      g.fillStyle(0xf06292, 1);
-      g.fillCircle(px - 4, by + bh - 27, 3);
-      g.fillStyle(0xffd54f, 1);
-      g.fillCircle(px + 4, by + bh - 23, 3);
-    });
+  // 4 px = 1 m (só para exibição)
+  function fmtDist(px) {
+    const m = px / 4;
+    if (m >= 1000) return (m / 1000).toFixed(1).replace('.', ',') + ' km';
+    return Math.max(10, Math.round(m / 10) * 10) + ' m';
   }
 
-  // ---------- ÁRVORE (copa vista de cima) 72x72 ----------
-  function drawTree(g) {
-    g.fillStyle(0x000000, 0.22);
-    g.fillEllipse(40, 46, 56, 40);
-    g.fillStyle(0x2d6a34, 1);
-    g.fillCircle(36, 34, 28);
-    g.fillStyle(0x3b8a43, 1);
-    g.fillCircle(30, 28, 20);
-    g.fillCircle(44, 30, 16);
-    g.fillStyle(0x56b05a, 1);
-    g.fillCircle(28, 24, 10);
-    g.fillCircle(42, 22, 7);
-    g.fillStyle(0x24562b, 1);
-    g.fillCircle(46, 44, 5);
-    g.fillCircle(24, 42, 4);
+  // Ponto central da borda de um portal (em coordenadas do mundo)
+  function portalPoint(p) {
+    const s = SEGMENTS[p.seg];
+    const mid = (p.min + p.max) / 2;
+    if (p.edge === 'S') return { x: s.ox + mid, y: s.oy + s.h };
+    if (p.edge === 'N') return { x: s.ox + mid, y: s.oy };
+    if (p.edge === 'E') return { x: s.ox + s.w, y: s.oy + mid };
+    return { x: s.ox, y: s.oy + mid };
   }
 
-  // ---------- SALA INTERNA 800x560 ----------
-  function drawRoom(g) {
-    const W = ROOM.w, H = ROOM.h;
-    const rnd = mulberry32(11);
-
-    // piso de madeira
-    g.fillStyle(0xb5834f, 1);
-    g.fillRect(0, 0, W, H);
-    for (let y = 100, i = 0; y < H; y += 28, i++) {
-      g.fillStyle(i % 2 ? 0xad7a47 : 0xbb8a56, 1);
-      g.fillRect(0, y, W, 28);
-      g.fillStyle(0x8f6339, 0.6);
-      g.fillRect(0, y, W, 1);
-      for (let x = (i * 97) % 160; x < W; x += 160) g.fillRect(x, y, 1, 28);
-    }
-
-    // parede dos fundos
-    g.fillStyle(0xe6e0d1, 1);
-    g.fillRect(0, 0, W, 100);
-    g.fillStyle(0xc9d2dc, 1);
-    g.fillRect(0, 62, W, 32);
-    g.fillStyle(0xaab6c4, 1);
-    g.fillRect(0, 62, W, 3);
-    g.fillStyle(0x5d4a37, 1);
-    g.fillRect(0, 94, W, 6);
-    g.fillStyle(0x4a3b2c, 1);
-    g.fillRect(0, 0, W, 6);
-
-    // paredes laterais e inferior
-    g.fillStyle(0x6e5d49, 1);
-    g.fillRect(0, 0, 26, H);
-    g.fillRect(W - 26, 0, 26, H);
-    g.fillRect(0, H - 26, W, 26);
-
-    // porta de saída (vão na parede inferior) + tapete de entrada
-    g.fillStyle(0xd9c9a8, 1);
-    g.fillRect(360, H - 26, 80, 26);
-    g.lineStyle(3, 0x4a3b2c, 1);
-    g.strokeRect(360, H - 26, 80, 26);
-    g.fillStyle(0x7a2e2e, 1);
-    g.fillRect(366, H - 52, 68, 24);
-    g.lineStyle(2, 0x5a1f1f, 1);
-    g.strokeRect(366, H - 52, 68, 24);
-
-    // janelas
-    [50, 170].forEach((x) => {
-      const y = 22;
-      g.fillStyle(0xf4efe3, 1);
-      g.fillRect(x - 4, y - 4, 108, 62);
-      g.fillStyle(0x86c5e8, 1);
-      g.fillRect(x, y, 100, 54);
-      g.fillStyle(0xbfe6f7, 0.7);
-      g.fillTriangle(x, y, x + 60, y, x, y + 54);
-      g.fillStyle(0xf4efe3, 1);
-      g.fillRect(x + 48, y, 4, 54);
-      g.fillRect(x, y + 25, 100, 4);
-    });
-
-    // relógio
-    g.fillStyle(0x4a3b2c, 1);
-    g.fillCircle(320, 40, 20);
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(320, 40, 17);
-    g.lineStyle(2, 0x222222, 1);
-    g.lineBetween(320, 40, 320, 28);
-    g.lineBetween(320, 40, 329, 44);
-
-    // quadros e calendário
-    [[480, 24], [570, 24]].forEach(([x, y], i) => {
-      g.fillStyle(0x3b3b3b, 1);
-      g.fillRect(x, y, 70, 48);
-      g.fillStyle(i ? 0xc9a86a : 0x6aa0c8, 1);
-      g.fillRect(x + 4, y + 4, 62, 40);
-      g.fillStyle(i ? 0x8a6b3a : 0x3e7aa8, 1);
-      g.fillTriangle(x + 4, y + 44, x + 30, y + 18, x + 56, y + 44);
-    });
-    g.fillStyle(0xffffff, 1);
-    g.fillRect(680, 28, 40, 52);
-    g.fillStyle(0xc0392b, 1);
-    g.fillRect(680, 28, 40, 12);
-
-    // estante de livros (40,100,190,56)
-    g.fillStyle(0x6b4a2f, 1);
-    g.fillRect(40, 100, 190, 56);
-    g.fillStyle(0x4d3420, 1);
-    g.fillRect(44, 104, 182, 24);
-    g.fillRect(44, 130, 182, 22);
-    const cols = [0xc0392b, 0x2980b9, 0x27ae60, 0xf1c40f, 0x8e44ad, 0xe67e22, 0x16a085];
-    [[104, 24], [130, 22]].forEach(([ry, rh]) => {
-      let x = 46;
-      while (x < 220) {
-        const bw = 6 + Math.floor(rnd() * 6);
-        const bh = rh - 4 - Math.floor(rnd() * 6);
-        g.fillStyle(cols[Math.floor(rnd() * cols.length)], 1);
-        g.fillRect(x, ry + (rh - bh) - 2, bw, bh);
-        x += bw + 1;
+  // Próximo segmento no caminho de "from" até "to" (busca em largura)
+  function nextHop(from, to) {
+    if (from === to) return null;
+    const queue = [[from]];
+    const seen = {};
+    seen[from] = true;
+    while (queue.length) {
+      const path = queue.shift();
+      const last = path[path.length - 1];
+      for (let i = 0; i < PORTALS.length; i++) {
+        const p = PORTALS[i];
+        if (p.seg !== last || seen[p.to]) continue;
+        const np = path.concat(p.to);
+        if (p.to === to) return np[1];
+        seen[p.to] = true;
+        queue.push(np);
       }
-    });
-
-    // arquivos (250,100,44,50) e (298,100,44,50)
-    [250, 298].forEach((x) => {
-      g.fillStyle(0x8e98a5, 1);
-      g.fillRect(x, 100, 44, 50);
-      g.lineStyle(2, 0x5f6975, 1);
-      g.strokeRect(x, 100, 44, 50);
-      for (let i = 0; i < 3; i++) {
-        g.lineBetween(x + 2, 116 + i * 16, x + 42, 116 + i * 16);
-        g.fillStyle(0x333a43, 1);
-        g.fillRect(x + 16, 106 + i * 16, 12, 3);
-      }
-    });
-
-    // bebedouro (370,104,28,36)
-    g.fillStyle(0xeef2f6, 1);
-    g.fillRect(370, 120, 28, 20);
-    g.fillStyle(0x7ec8ee, 0.9);
-    g.fillCircle(384, 112, 12);
-    g.fillStyle(0xffffff, 0.6);
-    g.fillCircle(380, 108, 4);
-
-    // planta do canto (716,104,40,40)
-    drawPlant(g, 736, 124);
-
-    // mesa do computador (460,100,220,100)
-    g.fillStyle(0x000000, 0.2);
-    g.fillRect(464, 106, 220, 100);
-    g.fillStyle(0x7a5232, 1);
-    g.fillRect(460, 100, 220, 100);
-    g.fillStyle(0x92643c, 1);
-    g.fillRect(464, 104, 212, 92);
-    g.lineStyle(1, 0x6b4527, 0.6);
-    [128, 152, 176].forEach((y) => g.lineBetween(464, y, 676, y));
-
-    // monitor (visto de frente)
-    g.fillStyle(0x14171c, 1);
-    g.fillRoundedRect(516, 104, 108, 58, 4);
-    // tela: degradê em faixas
-    ['#1b4f8f', '#1f5a9e', '#2466ad', '#2a72bb'].forEach((hex, i) => {
-      g.fillStyle(parseInt(hex.slice(1), 16), 1);
-      g.fillRect(521, 109 + i * 11, 98, 12);
-    });
-    g.fillStyle(0xf3f6fb, 1);
-    g.fillRect(528, 114, 52, 30);
-    g.fillStyle(0x2d6cdf, 1);
-    g.fillRect(528, 114, 52, 6);
-    g.fillStyle(0x9aa7b8, 1);
-    g.fillRect(532, 124, 30, 3);
-    g.fillRect(532, 131, 40, 3);
-    g.fillRect(532, 138, 24, 3);
-    g.fillStyle(0xf39c12, 1);
-    g.fillRect(588, 116, 10, 10);
-    g.fillStyle(0x2ecc71, 1);
-    g.fillRect(588, 132, 10, 10);
-    g.fillStyle(0x0f2742, 1);
-    g.fillRect(521, 150, 98, 7);
-    g.fillStyle(0x6fb4ff, 1);
-    g.fillCircle(526, 153.5, 2.5);
-    g.fillStyle(0x2b2f36, 1);
-    g.fillRect(566, 162, 8, 6);
-    g.fillRect(548, 168, 44, 5);
-
-    // teclado e mouse
-    g.fillStyle(0xd5d9df, 1);
-    g.fillRect(532, 176, 76, 16);
-    g.fillStyle(0xaab0b9, 1);
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < 11; c++) g.fillRect(534 + c * 6.8, 178 + r * 4.6, 5, 3);
     }
-    g.fillStyle(0xe9ecf0, 1);
-    g.fillEllipse(626, 184, 12, 16);
-    g.lineStyle(1, 0x9aa1ab, 1);
-    g.lineBetween(626, 177, 626, 184);
-
-    // caneca, papéis e luminária
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(482, 120, 7);
-    g.fillStyle(0x5b3a26, 1);
-    g.fillCircle(482, 120, 4.5);
-    g.fillStyle(0xf8f8f8, 1);
-    g.fillRect(636, 112, 30, 22);
-    g.fillStyle(0xe6e6e6, 1);
-    g.fillRect(642, 116, 30, 22);
-    g.fillStyle(0x333333, 1);
-    g.fillCircle(660, 176, 5);
-    g.lineStyle(3, 0x333333, 1);
-    g.lineBetween(660, 176, 650, 160);
-    g.fillStyle(0xf6c445, 1);
-    g.fillCircle(648, 158, 8);
-
-    // cadeira do escritório
-    g.fillStyle(0x000000, 0.2);
-    g.fillCircle(573, 254, 22);
-    g.fillStyle(0x2f3640, 1);
-    g.fillCircle(570, 250, 22);
-    g.fillStyle(0x3d4654, 1);
-    g.fillCircle(570, 250, 15);
-    g.fillStyle(0x252b33, 1);
-    g.fillRoundedRect(552, 268, 36, 10, 5);
-    g.fillRect(542, 240, 6, 22);
-    g.fillRect(592, 240, 6, 22);
-
-    // tapete + mesa de reunião (90,330,200,110)
-    g.fillStyle(0x4f6b8a, 1);
-    g.fillRect(60, 290, 260, 190);
-    g.lineStyle(3, 0x2f435c, 1);
-    g.strokeRect(60, 290, 260, 190);
-    g.lineStyle(2, 0x6d89a8, 1);
-    g.strokeRect(72, 302, 236, 166);
-
-    [[120, 308], [260, 308], [120, 462], [260, 462], [70, 385], [310, 385]].forEach(([cx, cy]) => {
-      g.fillStyle(0x000000, 0.2);
-      g.fillCircle(cx + 2, cy + 3, 16);
-      g.fillStyle(0x3a4452, 1);
-      g.fillCircle(cx, cy, 16);
-      g.fillStyle(0x4a566a, 1);
-      g.fillCircle(cx, cy, 10);
-    });
-
-    g.fillStyle(0x000000, 0.2);
-    g.fillRoundedRect(94, 335, 200, 110, 14);
-    g.fillStyle(0x7a5232, 1);
-    g.fillRoundedRect(90, 330, 200, 110, 14);
-    g.fillStyle(0x92643c, 1);
-    g.fillRoundedRect(96, 336, 188, 98, 10);
-    g.fillStyle(0x9aa3ad, 1);
-    g.fillRect(140, 360, 36, 24);
-    g.fillStyle(0x2d6cdf, 1);
-    g.fillRect(143, 363, 30, 16);
-    g.fillStyle(0xf8f8f8, 1);
-    g.fillRect(210, 358, 34, 24);
-    g.fillRect(216, 388, 34, 22);
-
-    // sofá (540,420,170,70) + mesa de centro (570,350,110,50)
-    g.fillStyle(0x000000, 0.2);
-    g.fillRoundedRect(544, 425, 170, 70, 10);
-    g.fillStyle(0x3d6a77, 1);
-    g.fillRoundedRect(540, 420, 170, 70, 10);
-    g.fillStyle(0x2f535e, 1);
-    g.fillRoundedRect(540, 470, 170, 20, 8);
-    [546, 598, 650].forEach((x) => {
-      g.fillStyle(0x4f8798, 1);
-      g.fillRoundedRect(x, 424, 52, 44, 6);
-    });
-    g.fillStyle(0x2f535e, 1);
-    g.fillRect(540, 420, 8, 70);
-    g.fillRect(702, 420, 8, 70);
-
-    g.fillStyle(0x000000, 0.2);
-    g.fillRoundedRect(574, 355, 110, 50, 8);
-    g.fillStyle(0xcbb89a, 1);
-    g.fillRoundedRect(570, 350, 110, 50, 8);
-    g.fillStyle(0xdccdb0, 1);
-    g.fillRoundedRect(575, 355, 100, 40, 6);
-    g.fillStyle(0xc0392b, 1);
-    g.fillRect(590, 365, 24, 16);
-    g.fillStyle(0x2980b9, 1);
-    g.fillRect(620, 368, 24, 16);
-
-    // plantas dos cantos inferiores
-    drawPlant(g, 60, 490);
-    drawPlant(g, 750, 490);
-  }
-
-  function drawPlant(g, cx, cy) {
-    g.fillStyle(0x000000, 0.2);
-    g.fillCircle(cx + 3, cy + 4, 16);
-    g.fillStyle(0x9a5a34, 1);
-    g.fillCircle(cx, cy, 15);
-    g.fillStyle(0x6e3f22, 1);
-    g.fillCircle(cx, cy, 11);
-    g.fillStyle(0x2f8f4a, 1);
-    g.fillCircle(cx - 7, cy - 5, 11);
-    g.fillCircle(cx + 8, cy - 3, 10);
-    g.fillCircle(cx, cy + 8, 10);
-    g.fillStyle(0x4fb36a, 1);
-    g.fillCircle(cx - 5, cy - 7, 6);
-    g.fillCircle(cx + 6, cy - 5, 5);
+    return null;
   }
 
   /* ================= CENA PRINCIPAL ================= */
@@ -641,27 +165,40 @@
     }
 
     create() {
+      this.seg = SEGMENTS.city;
       this.state = 'driving';   // 'driving' | 'foot'
       this.indoor = false;      // a pé dentro do escritório?
-      this.uiOpen = false;      // interface do computador aberta?
-      this.busy = false;        // transição (fade) em andamento?
+      this.uiOpen = false;      // computador aberto?
+      this.busy = false;        // fade de entrada/saída do prédio?
+      this.teleporting = false; // fade de teleporte entre áreas?
       this.target = null;
       this.stuckTime = 0;
       this.interaction = null;
-      this.zoneInside = { cargo: false, work: false };
+      this.zoneInside = {};
       this.zoneGfx = {};
-      this.outSolids = [];
+      this.solids = { city: [], br: [], district: [] };
       this.inSolids = [];
+      this.portalCooldown = 0;
+      this.noticeCooldown = 0;
+      this.hitCooldown = 0;
+      this.dwell = 0;
+      this.paintKey = null;
+      this.cargoKey = null;
+      this.beaconKey = undefined;
 
       this.buildTextures();
-      this.buildOutdoor();
+      this.buildCity();
+      this.buildBR();
+      this.buildDistrict();
       this.buildIndoor();
       this.createTruck();
       this.createPlayer();
+      this.createBeacon();
       this.createInput();
+      this.refreshTruckLook();
 
       const cam = this.cameras.main;
-      cam.setBounds(0, 0, WORLD.w, WORLD.h);
+      this.applyBounds();
       cam.startFollow(this.truckView, true, 0.08, 0.08);
       cam.centerOn(this.truckView.x, this.truckView.y);
 
@@ -672,6 +209,13 @@
       this.events.on(Phaser.Scenes.Events.RENDER, this.positionAction, this);
 
       TC.ui.setDriving(true);
+      TC.ui.banner(this.seg.name, this.seg.sub);
+    }
+
+    /* ---------------- CÂMERA ---------------- */
+    applyBounds() {
+      const s = this.seg;
+      this.cameras.main.setBounds(s.ox - s.padX, s.oy - s.padY, s.w + 2 * s.padX, s.h + 2 * s.padY);
     }
 
     applyZoom() {
@@ -688,6 +232,12 @@
       }
     }
 
+    setSegment(seg) {
+      this.seg = seg;
+      this.applyBounds();
+      this.applyZoom();
+    }
+
     /* ---------------- TEXTURAS ---------------- */
     makeTexture(key, w, h, drawFn) {
       if (this.textures.exists(key)) return;
@@ -698,21 +248,39 @@
     }
 
     buildTextures() {
-      this.makeTexture('tex-ground', WORLD.w, WORLD.h, drawGround);
-      this.makeTexture('tex-office', 390, 320, drawOfficeTexture);
-      this.makeTexture('tex-tree', 72, 72, drawTree);
-      this.makeTexture('tex-room', ROOM.w, ROOM.h, drawRoom);
+      this.makeTexture('tex-ground', CFG.city.w, CFG.city.h, ART.drawGround);
+      this.makeTexture('tex-office', 390, 320, ART.drawOfficeTexture);
+      this.makeTexture('tex-tree', 72, 72, ART.drawTree);
+      this.makeTexture('tex-room', ROOM.w, ROOM.h, ART.drawRoom);
+      this.makeTexture('tex-grass', 128, 128, ART.drawGrassTile);
+      this.makeTexture('tex-asphalt', 128, 128, ART.drawAsphaltTile);
+      this.makeTexture('tex-concrete', 128, 128, ART.drawConcreteTile);
+      this.makeTexture('tex-hwy', 512, 256, ART.drawHighwayTile);
+      this.makeTexture('tex-rail', 16, 128, ART.drawRailTile);
+      this.makeTexture('tex-warehouse', 440, 280, ART.drawWarehouse);
     }
 
     addSolid(list, x, y, w, h) {
       list.push({ x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, r: Math.hypot(w, h) / 2 });
     }
 
-    /* ---------------- MAPA EXTERNO ---------------- */
-    buildOutdoor() {
+    addSign(x, y, text, bg) {
+      return this.add
+        .text(x, y, text, {
+          fontFamily: 'monospace', fontSize: '15px', fontStyle: 'bold', color: '#ffffff',
+          backgroundColor: bg || '#0b6b3a', padding: { x: 8, y: 5 },
+        })
+        .setOrigin(0.5)
+        .setDepth(6);
+    }
+
+    /* ---------------- CIDADE ---------------- */
+    buildCity() {
+      const sol = this.solids.city;
       this.add.image(0, 0, 'tex-ground').setOrigin(0).setDepth(0);
 
-      Object.keys(ZONES).forEach((key) => this.makeZone(key));
+      this.makeZone('cargo');
+      this.makeZone('work');
 
       // prédio do escritório
       this.add.image(OFFICE.x - 10, OFFICE.y - 20, 'tex-office').setOrigin(0).setDepth(4);
@@ -728,14 +296,18 @@
         })
         .setOrigin(0.5).setDepth(5).setAlpha(0.9);
 
-      this.addSolid(this.outSolids, OFFICE.x, OFFICE.y, OFFICE.w, OFFICE.h);
-      HEDGES.forEach((h) => this.addSolid(this.outSolids, h.x, h.y, h.w, h.h));
+      this.addSolid(sol, OFFICE.x, OFFICE.y, OFFICE.w, OFFICE.h);
+      CFG.hedges.forEach((h) => this.addSolid(sol, h.x, h.y, h.w, h.h));
 
       // árvores (copa acima do caminhão, tronco sólido)
       TREES.forEach((p) => {
         this.add.image(p[0], p[1], 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
-        this.addSolid(this.outSolids, p[0] - 17, p[1] - 17, 34, 34);
+        this.addSolid(sol, p[0] - 17, p[1] - 17, 34, 34);
       });
+
+      // placas de saída para a BR-116
+      this.addSign(700, 1760, '▼ BR-116 · DISTRITO INDUSTRIAL');
+      this.addSign(1540, 1760, '▼ BR-116');
     }
 
     makeZone(key) {
@@ -773,6 +345,193 @@
       g.strokeRect(z.x, z.y, z.w, z.h);
     }
 
+    /* ---------------- RODOVIA BR-116 ---------------- */
+    buildBR() {
+      const S = SEGMENTS.br;
+      const B = CFG.br;
+      const sol = this.solids.br;
+      const ox = S.ox;
+      const oy = S.oy;
+      const rnd = ART.mulberry32(99);
+
+      // grama (cobre também a margem extra da câmera)
+      this.add.tileSprite(ox - S.padX, oy, S.w + 2 * S.padX, S.h, 'tex-grass').setOrigin(0).setDepth(0);
+
+      // campos de plantio ao longe
+      const fields = this.add.graphics().setDepth(0.5);
+      const fcols = [0x4d7c3f, 0x6f8f3a, 0xb59a45, 0x3f6e4a];
+      for (let i = 0; i < 16; i++) {
+        const left = i % 2 === 0;
+        const fw = 160 + rnd() * 240;
+        const fh = 240 + rnd() * 420;
+        const fx = left ? ox - 740 + rnd() * (680 - fw) : ox + S.w + 60 + rnd() * (680 - fw);
+        const fy = oy + rnd() * (S.h - fh);
+        fields.fillStyle(fcols[Math.floor(rnd() * fcols.length)], 0.45);
+        fields.fillRect(fx, fy, fw, fh);
+      }
+
+      // pista (4 pistas + acostamentos)
+      this.add.tileSprite(ox + B.roadX, oy, B.roadW, S.h, 'tex-hwy').setOrigin(0).setDepth(1);
+
+      // defensas metálicas dos dois lados (sólidas)
+      const railL = ox + B.roadX - 24;
+      const railR = ox + B.roadX + B.roadW + 8;
+      this.add.tileSprite(railL, oy, 16, S.h, 'tex-rail').setOrigin(0).setDepth(3);
+      this.add.tileSprite(railR, oy, 16, S.h, 'tex-rail').setOrigin(0).setDepth(3);
+      this.addSolid(sol, railL - 16, oy, 32, S.h);
+      this.addSolid(sol, railR, oy, 32, S.h);
+
+      // árvores nas laterais
+      for (let y = 60; y < S.h; y += 90 + rnd() * 60) {
+        this.add.image(ox + 20 + rnd() * 240, oy + y, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+        this.add.image(ox + 930 + rnd() * 230, oy + y + rnd() * 40, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+      }
+      for (let y = 100; y < S.h; y += 160 + rnd() * 80) {
+        this.add.image(ox - 120 - rnd() * 520, oy + y, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+        this.add.image(ox + S.w + 120 + rnd() * 520, oy + y, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+      }
+
+      // pórticos com placas
+      this.addGantry(S, 700, 'DISTRITO INDUSTRIAL ▼ 3 km');
+      this.addGantry(S, 2400, 'DISTRITO INDUSTRIAL ▼ 1,5 km');
+      this.addGantry(S, 4000, 'DISTRITO INDUSTRIAL ▼ 500 m');
+
+      // marcos de quilômetro (lado direito) e escudos BR
+      for (let k = 1; k <= 7; k++) {
+        this.add
+          .text(ox + B.roadX + B.roadW + 52, oy + k * 640, 'KM ' + (100 + k), {
+            fontFamily: 'monospace', fontSize: '12px', fontStyle: 'bold', color: '#111111',
+            backgroundColor: '#f4f4f4', padding: { x: 5, y: 3 },
+          })
+          .setOrigin(0.5).setDepth(6);
+      }
+      [300, 1700, 3300].forEach((y) => this.addShield(ox + 250, oy + y));
+      this.addSign(ox + 1040, oy + 1500, 'TRUCK CITY ▲');
+    }
+
+    addShield(x, y) {
+      this.add.rectangle(x, y, 46, 54, 0xf2c200).setStrokeStyle(3, 0x111111).setDepth(6);
+      this.add
+        .text(x, y, 'BR\n116', { fontFamily: 'monospace', fontSize: '15px', fontStyle: 'bold', color: '#111111', align: 'center' })
+        .setOrigin(0.5).setDepth(7);
+    }
+
+    // Pórtico sobre a pista (fica acima do caminhão)
+    addGantry(S, y, text) {
+      const B = CFG.br;
+      const x0 = S.ox + B.roadX - 36;
+      const w = B.roadW + 72;
+      const cx = S.ox + B.roadX + B.roadW / 2;
+      const g = this.add.graphics().setDepth(15);
+      g.fillStyle(0x000000, 0.22);
+      g.fillRect(x0 + 10, y + 16, w, 18);
+      g.fillStyle(0x4a5059, 1);
+      g.fillRect(x0, y, w, 14);
+      g.fillStyle(0x2f343a, 1);
+      g.fillRect(x0 - 8, y - 8, 26, 30);
+      g.fillRect(x0 + w - 18, y - 8, 26, 30);
+      g.fillStyle(0x0b6b3a, 0.96);
+      g.fillRect(cx - 190, y - 36, 380, 52);
+      g.lineStyle(3, 0xffffff, 1);
+      g.strokeRect(cx - 188, y - 34, 376, 48);
+      this.add
+        .text(cx, y - 10, text, { fontFamily: 'monospace', fontSize: '16px', fontStyle: 'bold', color: '#ffffff' })
+        .setOrigin(0.5).setDepth(16);
+    }
+
+    /* ---------------- DISTRITO INDUSTRIAL ---------------- */
+    buildDistrict() {
+      const S = SEGMENTS.district;
+      const ox = S.ox;
+      const oy = S.oy;
+      const sol = this.solids.district;
+      const rnd = ART.mulberry32(5);
+
+      // gramado externo + pátio de concreto
+      this.add.tileSprite(ox - S.padX, oy - S.padY, S.w + 2 * S.padX, S.h + 2 * S.padY, 'tex-grass').setOrigin(0).setDepth(0);
+      this.add.tileSprite(ox, oy, S.w, S.h, 'tex-concrete').setOrigin(0).setDepth(0.2);
+
+      // ruas: entrada (norte) e via do pátio
+      this.add.tileSprite(ox + 700, oy, 200, 520, 'tex-asphalt').setOrigin(0).setDepth(1);
+      this.add.tileSprite(ox + 80, oy + 500, 1440, 220, 'tex-asphalt').setOrigin(0).setDepth(1);
+
+      // marcações
+      const g = this.add.graphics().setDepth(2);
+      g.fillStyle(0xe8d44d, 1);
+      for (let y = 0; y < 500; y += 80) g.fillRect(ox + 798, oy + y, 4, 40);
+      for (let x = 80; x < 1520; x += 80) {
+        if (x + 40 > 700 && x < 900) continue;
+        g.fillRect(ox + x, oy + 608, 40, 4);
+      }
+      g.fillStyle(0xf2f2f2, 0.8);
+      g.fillRect(ox + 706, oy, 4, 500);
+      g.fillRect(ox + 890, oy, 4, 500);
+      g.fillRect(ox + 80, oy + 506, 620, 4);
+      g.fillRect(ox + 900, oy + 506, 620, 4);
+      g.fillRect(ox + 80, oy + 710, 1440, 4);
+      // perímetro
+      g.lineStyle(10, 0x3b3f45, 1);
+      g.strokeRect(ox + 5, oy + 5, S.w - 10, S.h - 10);
+
+      this.makeZone('warehouse');
+      this.makeZone('port');
+
+      const label = (x, y, txt) => this.add
+        .text(x, y, txt, {
+          fontFamily: 'monospace', fontSize: '20px', fontStyle: 'bold', color: '#ffffff',
+          stroke: '#1d2733', strokeThickness: 4,
+        })
+        .setOrigin(0.5).setDepth(5).setAlpha(0.95);
+
+      // Armazém Central
+      this.add.image(ox + 130, oy + 930, 'tex-warehouse').setOrigin(0).setDepth(4);
+      this.addSolid(sol, ox + 130, oy + 930, 432, 272);
+      label(ox + 346, oy + 1040, 'ARMAZÉM CENTRAL');
+
+      // Galpão logístico (decoração)
+      this.add.image(ox + 1040, oy + 110, 'tex-warehouse').setOrigin(0).setDepth(4);
+      this.addSolid(sol, ox + 1040, oy + 110, 432, 272);
+      label(ox + 1256, oy + 220, 'GALPÃO LOGÍSTICO');
+
+      // Terminal do Porto Seco (pilhas de contêineres) e blocos de contêineres
+      const gc = this.add.graphics().setDepth(4);
+      const b1 = this.containerBlock(gc, ox + 960, oy + 930, 5, 5, rnd);
+      this.addSolid(sol, ox + 960, oy + 930, b1.w, b1.h);
+      const b2 = this.containerBlock(gc, ox + 100, oy + 70, 6, 4, rnd);
+      this.addSolid(sol, ox + 100, oy + 70, b2.w, b2.h);
+      const b3 = this.containerBlock(gc, ox + 100, oy + 300, 6, 4, rnd);
+      this.addSolid(sol, ox + 100, oy + 300, b3.w, b3.h);
+
+      this.addSign(ox + 1000, oy + 60, 'DISTRITO INDUSTRIAL ▸');
+
+      // árvores no fundo do pátio
+      [[150, 1450], [400, 1520], [700, 1450], [1000, 1530], [1300, 1460], [1500, 1540]].forEach((p) => {
+        this.add.image(ox + p[0], oy + p[1], 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+        this.addSolid(sol, ox + p[0] - 17, oy + p[1] - 17, 34, 34);
+      });
+    }
+
+    // Desenha uma pilha de contêineres e devolve suas dimensões
+    containerBlock(g, x, y, cols, rows, rnd) {
+      const cw = 84, ch = 34, gap = 4;
+      const palette = [0xc0392b, 0x2980b9, 0x27ae60, 0xe67e22, 0x8e44ad, 0x16a085, 0xf1c40f, 0x7f8c8d];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cx = x + c * (cw + gap);
+          const cy = y + r * (ch + gap);
+          g.fillStyle(0x000000, 0.25);
+          g.fillRect(cx + 3, cy + 4, cw, ch);
+          g.fillStyle(palette[Math.floor(rnd() * palette.length)], 1);
+          g.fillRect(cx, cy, cw, ch);
+          g.fillStyle(0x000000, 0.18);
+          for (let i = 1; i < 7; i++) g.fillRect(cx + i * 12, cy, 2, ch);
+          g.lineStyle(2, 0x000000, 0.35);
+          g.strokeRect(cx, cy, cw, ch);
+        }
+      }
+      return { w: cols * (cw + gap), h: rows * (ch + gap) };
+    }
+
     /* ---------------- SALA INTERNA ---------------- */
     buildIndoor() {
       this.add.image(ROOM.x, ROOM.y, 'tex-room').setOrigin(0).setDepth(1);
@@ -798,7 +557,7 @@
       this.tweens.add({ targets: glow, alpha: 0.2, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
 
-    /* ---------------- CAMINHÃO (Fase 1, intacto + sombra) ---------------- */
+    /* ---------------- CAMINHÃO ---------------- */
     createTruck() {
       const T = TRUCK;
       const h = T.spawn.heading;
@@ -808,6 +567,7 @@
         speed: 0,
         steer: 0,
         reverseLock: false,
+        portalHit: null,
         // O estado físico fica no EIXO TRASEIRO (modelo bicicleta)
         rx: T.spawn.x - Math.cos(h) * T.rearToCenter,
         ry: T.spawn.y - Math.sin(h) * T.rearToCenter,
@@ -825,27 +585,13 @@
       g.lineStyle(2, 0x6b7480, 1);
       g.strokeRect(-70, -27, 92, 54);
 
-      // cabine (frente = +x)
-      g.fillStyle(0xd64541, 1);
-      g.fillRect(24, -25, 46, 50);
-      g.lineStyle(2, 0x8f2a27, 1);
-      g.strokeRect(24, -25, 46, 50);
-
-      // para-brisa e faróis
-      g.fillStyle(0x1b2a3a, 1);
-      g.fillRect(52, -20, 12, 40);
-      g.fillStyle(0xfff3a0, 1);
-      g.fillRect(68, -22, 3, 9);
-      g.fillRect(68, 13, 3, 9);
-
-      // marca da porta do motorista (lado esquerdo)
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(32, -29, 16, 3);
-
       // rodas traseiras (fixas)
       g.fillStyle(0x0b0b0b, 1);
       g.fillRect(-56, -31, 22, 8);
       g.fillRect(-56, 23, 22, 8);
+
+      this.cargoG = this.add.graphics();  // caixas sobre o baú (quando carregado)
+      this.cabG = this.add.graphics();    // cabine (muda de cor com a pintura)
 
       // lanternas traseiras (acendem ao frear)
       this.tailL = this.add.rectangle(-69, -19, 3, 10, 0x6b0000);
@@ -856,8 +602,61 @@
       this.wheelFL = this.add.rectangle(fx, -27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
       this.wheelFR = this.add.rectangle(fx, 27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
 
-      c.add([shadow, g, this.tailL, this.tailR, this.wheelFL, this.wheelFR]);
+      c.add([shadow, g, this.cargoG, this.cabG, this.tailL, this.tailR, this.wheelFL, this.wheelFR]);
       this.truckView = c;
+    }
+
+    drawCab(hexStr) {
+      const g = this.cabG;
+      g.clear();
+      const base = Phaser.Display.Color.HexStringToColor(hexStr).color;
+      const dark = Phaser.Display.Color.HexStringToColor(hexStr).darken(32).color;
+      g.fillStyle(base, 1);
+      g.fillRect(24, -25, 46, 50);
+      g.lineStyle(2, dark, 1);
+      g.strokeRect(24, -25, 46, 50);
+      g.fillStyle(0x1b2a3a, 1);
+      g.fillRect(52, -20, 12, 40);
+      g.fillStyle(0xfff3a0, 1);
+      g.fillRect(68, -22, 3, 9);
+      g.fillRect(68, 13, 3, 9);
+      g.fillStyle(0xffffff, 1);
+      g.fillRect(32, -29, 16, 3); // marca da porta do motorista (lado esquerdo)
+    }
+
+    drawCargo(contractId) {
+      const g = this.cargoG;
+      g.clear();
+      if (!contractId) return;
+      const c = STORE.contract(contractId);
+      if (!c) return;
+      const fill = Phaser.Display.Color.HexStringToColor(c.color).color;
+      const edge = Phaser.Display.Color.HexStringToColor(c.color).darken(32).color;
+      for (let r = 0; r < 2; r++) {
+        for (let k = 0; k < 3; k++) {
+          const x = -64 + k * 28;
+          const y = -22 + r * 23;
+          g.fillStyle(fill, 1);
+          g.fillRect(x, y, 26, 21);
+          g.lineStyle(2, edge, 1);
+          g.strokeRect(x, y, 26, 21);
+        }
+      }
+    }
+
+    // Atualiza pintura e carga visíveis conforme o estado salvo
+    refreshTruckLook() {
+      const col = STORE.data.paint;
+      if (this.paintKey !== col) {
+        this.paintKey = col;
+        this.drawCab(col);
+      }
+      const m = STORE.data.mission;
+      const key = m && m.stage === 'transit' ? m.id : '';
+      if (this.cargoKey !== key) {
+        this.cargoKey = key;
+        this.drawCargo(key);
+      }
     }
 
     /* ---------------- PERSONAGEM ---------------- */
@@ -874,6 +673,28 @@
         .setVisible(false);
     }
 
+    // Contorno pulsante na zona do objetivo da missão
+    createBeacon() {
+      this.beacon = this.add
+        .rectangle(0, 0, 100, 100, 0xffffff, 0)
+        .setStrokeStyle(6, 0xffffff, 1)
+        .setDepth(6)
+        .setVisible(false);
+      this.tweens.add({ targets: this.beacon, alpha: 0.25, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
+
+    setBeacon(zoneKey) {
+      const k = zoneKey && ZONES[zoneKey].seg === this.seg.id && !this.indoor ? zoneKey : null;
+      if (this.beaconKey === k) return;
+      this.beaconKey = k;
+      if (!k) {
+        this.beacon.setVisible(false);
+        return;
+      }
+      const z = ZONES[k];
+      this.beacon.setPosition(z.x + z.w / 2, z.y + z.h / 2).setSize(z.w + 16, z.h + 16).setVisible(true);
+    }
+
     /* ---------------- INPUT ---------------- */
     createInput() {
       const K = Phaser.Input.Keyboard.KeyCodes;
@@ -887,7 +708,7 @@
 
       // Clique (PC) ou toque (celular) no mapa: andar até o ponto
       this.input.on('pointerdown', (pointer) => {
-        if (this.state !== 'foot' || this.busy || this.uiOpen) return;
+        if (this.state !== 'foot' || this.busy || this.uiOpen || this.teleporting) return;
         this.setTarget(pointer.worldX, pointer.worldY);
       });
     }
@@ -898,7 +719,8 @@
       if (this.indoor) {
         return { x0: ROOM_WALK.x0 + R, y0: ROOM_WALK.y0 + R, x1: ROOM_WALK.x1 - R, y1: ROOM_WALK.y1 - R };
       }
-      return { x0: R, y0: R, x1: WORLD.w - R, y1: WORLD.h - R };
+      const s = this.seg;
+      return { x0: s.ox + R, y0: s.oy + R, x1: s.ox + s.w - R, y1: s.oy + s.h - R };
     }
 
     setTarget(x, y) {
@@ -939,13 +761,23 @@
       const dt = Math.min(delta / 1000, 0.05);
       TC.ui.update(dt);
 
-      const frozen = this.uiOpen || this.busy;
+      if (this.portalCooldown > 0) this.portalCooldown -= dt;
+      if (this.noticeCooldown > 0) this.noticeCooldown -= dt;
+      if (this.hitCooldown > 0) this.hitCooldown -= dt;
+
+      const frozen = this.uiOpen || this.busy || this.teleporting;
       let inp = this.readInput(); // sempre lê, para não acumular "teclas pendentes"
       if (frozen) {
         inp = { left: 0, right: 0, up: 0, down: 0, throttle: 0, brake: 0, steer: 0, action: false };
       }
 
       this.interaction = frozen ? null : this.computeInteraction();
+
+      // durante o fade de teleporte nada se move
+      if (this.teleporting) {
+        this.positionAction();
+        return;
+      }
 
       if (this.state === 'driving') {
         this.updateTruck(dt, inp, false);
@@ -957,14 +789,22 @@
 
       if (inp.action) this.handleAction();
 
+      if (!frozen && !this.indoor) this.updateMission(dt);
+      this.checkPortal();
+      this.refreshTruckLook();
       this.syncVisuals();
       this.updateZonesAndHud();
+      this.updateObjectiveUi();
     }
 
-    /* ---------------- FÍSICA DO CAMINHÃO (Ackermann / bicicleta) - Fase 1 ---------------- */
+    /* ---------------- FÍSICA DO CAMINHÃO (Ackermann / bicicleta) ---------------- */
     updateTruck(dt, inp, parked) {
       const T = TRUCK;
       const t = this.truck;
+      const M = STORE.mods(); // upgrades e condição
+      const maxFwd = T.maxFwd * M.maxFwd;
+      const accel = T.accel * M.accel;
+      const brakeF = T.brake * M.brake;
       let v = t.speed;
 
       const gas = inp.throttle > 0;
@@ -972,32 +812,32 @@
       if (!brk) t.reverseLock = false;
 
       if (parked) {
-        v = approach(v, 0, T.brake * 0.8 * dt);
+        v = approach(v, 0, brakeF * 0.8 * dt);
       } else if (gas && !brk) {
-        if (v < 0) v = Math.min(0, v + T.brake * dt);                 // freia a ré antes de avançar
-        else v += T.accel * (1 - 0.6 * (v / T.maxFwd)) * dt;          // aceleração gradual
+        if (v < 0) v = Math.min(0, v + brakeF * dt);                  // freia a ré antes de avançar
+        else v += accel * (1 - 0.6 * (v / maxFwd)) * dt;              // aceleração gradual
       } else if (brk && !gas) {
         if (v > 1) {
-          v = Math.max(0, v - T.brake * dt);                          // frenagem
+          v = Math.max(0, v - brakeF * dt);                           // frenagem
           t.reverseLock = true;                                       // evita engatar ré sem querer
         } else if (!t.reverseLock) {
           v -= T.revAccel * dt;                                       // ré
         } else {
-          v = approach(v, 0, T.brake * dt);
+          v = approach(v, 0, brakeF * dt);
         }
       } else if (gas && brk) {
-        v = approach(v, 0, T.brake * dt);
+        v = approach(v, 0, brakeF * dt);
       } else {
         v = approach(v, 0, (T.roll + Math.abs(v) * T.drag) * dt);     // inércia / atrito
       }
 
-      v = clamp(v, -T.maxRev, T.maxFwd);
+      v = clamp(v, -T.maxRev, maxFwd);
 
       // Esterço: limitado conforme a velocidade e suavizado
-      const speedRatio = clamp(Math.abs(v) / T.maxFwd, 0, 1);
-      const maxSteer = lerp(T.steerLow, T.steerHigh, speedRatio);
+      const speedRatio = clamp(Math.abs(v) / maxFwd, 0, 1);
+      const maxSteer = lerp(T.steerLow, T.steerHigh * M.steerHigh, speedRatio);
       const targetSteer = inp.steer * maxSteer;
-      const rate = (inp.steer !== 0 ? T.steerRate : T.steerReturn) * dt;
+      const rate = (inp.steer !== 0 ? T.steerRate * M.steerRate : T.steerReturn) * dt;
       t.steer = approach(t.steer, targetSteer, rate);
 
       const prev = { rx: t.rx, ry: t.ry, heading: t.heading };
@@ -1012,26 +852,39 @@
       let cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
       let cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
 
-      // [Fase 2] Colisão com prédio, árvores e sebes: volta ao frame anterior
+      // Colisão com prédios, árvores, sebes, defensas, contêineres: volta ao frame anterior + dano
       if (COLLISIONS.truck && Math.abs(v) > 0.01 && this.truckHitsSolid(cx, cy, t.heading)) {
         t.rx = prev.rx;
         t.ry = prev.ry;
         t.heading = prev.heading;
         cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
         cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
+        const sp = Math.abs(v);
         v = -v * 0.2; // pequeno "quique" para trás
+        if (sp > 20) this.applyDamage((sp / maxFwd) * 12);
       }
 
-      // Limites do mundo
-      const M = 80;
-      const ccx = clamp(cx, M, WORLD.w - M);
-      const ccy = clamp(cy, M, WORLD.h - M);
-      if (ccx !== cx || ccy !== cy) {
-        v *= 0.6;
-        t.rx += ccx - cx;
-        t.ry += ccy - cy;
-        cx = ccx;
-        cy = ccy;
+      // Limites do segmento: nas ruas que levam a outra área vira PORTAL (teleporte)
+      const seg = this.seg;
+      const MG = 80;
+      const hit = this.state === 'driving' ? this.portalAt(cx, cy) : null;
+      t.portalHit = hit;
+      if (!hit) {
+        const ccx = clamp(cx, seg.ox + MG, seg.ox + seg.w - MG);
+        const ccy = clamp(cy, seg.oy + MG, seg.oy + seg.h - MG);
+        if (ccx !== cx || ccy !== cy) {
+          if (this.state === 'driving' && Math.abs(v) > 60 && this.noticeCooldown <= 0) {
+            this.noticeCooldown = 3;
+            if (seg.id === 'city') TC.ui.flash('Fim da via. A saída para a BR-116 fica ao sul.', 2600);
+            else if (seg.id === 'district') TC.ui.flash('Fim do pátio. A saída para a BR-116 fica ao norte.', 2600);
+            else TC.ui.flash('Fim da pista.', 1800);
+          }
+          v *= 0.6;
+          t.rx += ccx - cx;
+          t.ry += ccy - cy;
+          cx = ccx;
+          cy = ccy;
+        }
       }
 
       t.speed = v;
@@ -1051,7 +904,7 @@
       const ex = ac * hx + as * hy; // meia-extensão do caminhão no eixo X do mundo
       const ey = as * hx + ac * hy; // ... no eixo Y
 
-      const list = this.outSolids;
+      const list = this.solids[this.seg.id];
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
         const dx = s.cx - cx;
@@ -1071,7 +924,224 @@
       return false;
     }
 
-    /* ---------------- PERSONAGEM A PÉ (Fase 1 + colisões) ---------------- */
+    applyDamage(dmg) {
+      STORE.damage(dmg);
+      this.cameras.main.shake(140, 0.004);
+      if (this.hitCooldown <= 0) {
+        this.hitCooldown = 1.2;
+        TC.ui.flash('Colisão! Condição do caminhão: ' + Math.round(STORE.data.condition) + '%', 1800);
+      }
+    }
+
+    /* ---------------- PORTAIS / TELEPORTE ---------------- */
+    // Devolve o portal atingido (ou null) para a posição do centro do caminhão
+    portalAt(cx, cy) {
+      const seg = this.seg;
+      const MG = 80;
+      const lx = cx - seg.ox;
+      const ly = cy - seg.oy;
+      for (let i = 0; i < PORTALS.length; i++) {
+        const p = PORTALS[i];
+        if (p.seg !== seg.id) continue;
+        let hit = false;
+        let lat = 0;
+        if (p.edge === 'S') { hit = ly >= seg.h - MG; lat = lx; }
+        else if (p.edge === 'N') { hit = ly <= MG; lat = lx; }
+        else if (p.edge === 'E') { hit = lx >= seg.w - MG; lat = ly; }
+        else { hit = lx <= MG; lat = ly; }
+        if (hit && lat >= p.min && lat <= p.max) return p;
+      }
+      return null;
+    }
+
+    checkPortal() {
+      const t = this.truck;
+      if (this.state !== 'driving' || this.teleporting || this.indoor || this.portalCooldown > 0 || !t.portalHit) return;
+      this.startTeleport(t.portalHit);
+    }
+
+    startTeleport(p) {
+      this.teleporting = true;
+      this.clearTarget();
+      TC.ui.resetInputs();
+      const cam = this.cameras.main;
+      cam.fadeOut(200, 0, 0, 0);
+
+      this.time.delayedCall(230, () => {
+        const t = this.truck;
+        const from = this.seg;
+        const to = SEGMENTS[p.to];
+
+        // preserva a posição lateral dentro da pista (limitada por "spread")
+        const lateralIsX = p.edge === 'N' || p.edge === 'S';
+        const lat = lateralIsX ? t.cx - from.ox : t.cy - from.oy;
+        const off = clamp(lat - (p.min + p.max) / 2, -p.spread, p.spread);
+        let nx = to.ox + p.arrive.x;
+        let ny = to.oy + p.arrive.y;
+        if (p.arrive.axis === 'x') nx += off;
+        else ny += off;
+
+        t.cx = nx;
+        t.cy = ny;
+        t.rx = nx - Math.cos(t.heading) * TRUCK.rearToCenter;
+        t.ry = ny - Math.sin(t.heading) * TRUCK.rearToCenter;
+        t.portalHit = null;
+
+        this.setSegment(to);
+        this.syncVisuals();
+        cam.stopFollow();
+        cam.centerOn(nx, ny);
+        cam.startFollow(this.truckView, true, 0.08, 0.08);
+        cam.fadeIn(240, 0, 0, 0);
+
+        this.portalCooldown = 1.5;
+        this.teleporting = false;
+        TC.ui.banner(to.name, to.sub);
+      });
+    }
+
+    /* ---------------- MISSÕES ---------------- */
+    truckCorners() {
+      const hx = TRUCK.halfL;
+      const hy = TRUCK.halfW;
+      return [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map((c) => toWorld(this.truck, c[0], c[1]));
+    }
+
+    zoneContains(corners, key) {
+      const z = ZONES[key];
+      if (z.seg !== this.seg.id) return false;
+      const tol = ZONE_TOL;
+      return corners.every(
+        (pt) => pt.x >= z.x - tol && pt.x <= z.x + z.w + tol && pt.y >= z.y - tol && pt.y <= z.y + z.h + tol
+      );
+    }
+
+    updateMission(dt) {
+      const m = STORE.data.mission;
+      if (!m) {
+        this.dwell = 0;
+        return;
+      }
+      const c = STORE.contract(m.id);
+      const zoneKey = m.stage === 'pickup' ? 'cargo' : c.to;
+      const inZone = this.zoneContains(this.truckCorners(), zoneKey);
+      const stopped = Math.abs(this.truck.speed) < 6;
+
+      if (m.stage === 'transit') {
+        m.timeLeft -= dt;
+        STORE.markDirty();
+      }
+
+      if (inZone && stopped) this.dwell += dt;
+      else this.dwell = Math.max(0, this.dwell - dt * 2);
+
+      if (this.dwell >= DWELL_TIME) {
+        this.dwell = 0;
+        if (m.stage === 'pickup') {
+          m.stage = 'transit';
+          m.timeLeft = c.time;
+          m.damage = 0;
+          STORE.touch();
+          TC.ui.flash('Carga carregada! Siga para ' + STORE.DEST[c.to].name + '.', 3400);
+        } else {
+          const res = STORE.completeMission();
+          if (res) this.showSummary(res);
+        }
+      }
+    }
+
+    showSummary(res) {
+      const f = STORE.fmt;
+      let html =
+        '<div class="sum-card">' +
+          '<div class="sum-head">ENTREGA CONCLUÍDA</div>' +
+          '<div class="sum-title">' + res.title + '</div><dl>' +
+          '<div><dt>Pagamento base</dt><dd>' + f(res.base) + '</dd></div>';
+      if (res.bonus) html += '<div class="plus"><dt>Bônus de rapidez</dt><dd>+ ' + f(res.bonus) + '</dd></div>';
+      if (res.late) html += '<div class="minus"><dt>Atraso na entrega</dt><dd>- ' + f(res.late) + '</dd></div>';
+      if (res.dmg) html += '<div class="minus"><dt>Carga avariada</dt><dd>- ' + f(res.dmg) + '</dd></div>';
+      html += '<div class="total"><dt>Total recebido</dt><dd>' + f(res.total) + '</dd></div></dl>';
+      if (res.levelUp) html += '<div class="sum-level">Sua transportadora subiu para o nível ' + res.level + '! Novos contratos liberados.</div>';
+      html += '<button class="btn primary" data-close>Continuar</button></div>';
+      TC.ui.showSummary(html);
+    }
+
+    // Seta de navegação para o objetivo (entre áreas, aponta para a saída certa)
+    navInfo(zoneKey) {
+      const z = ZONES[zoneKey];
+      const ref = this.state === 'driving' ? { x: this.truck.cx, y: this.truck.cy } : { x: this.p.x, y: this.p.y };
+      let tx;
+      let ty;
+      let exit = false;
+      if (z.seg === this.seg.id) {
+        tx = z.x + z.w / 2;
+        ty = z.y + z.h / 2;
+      } else {
+        const hop = nextHop(this.seg.id, z.seg);
+        if (!hop) return null;
+        let best = null;
+        let bd = Infinity;
+        PORTALS.forEach((p) => {
+          if (p.seg !== this.seg.id || p.to !== hop) return;
+          const pt = portalPoint(p);
+          const d = Math.hypot(pt.x - ref.x, pt.y - ref.y);
+          if (d < bd) { bd = d; best = pt; }
+        });
+        if (!best) return null;
+        tx = best.x;
+        ty = best.y;
+        exit = true;
+      }
+      const dist = Math.hypot(tx - ref.x, ty - ref.y);
+      return { angle: Math.atan2(ty - ref.y, tx - ref.x), dist: (exit ? 'Saída ' : '') + fmtDist(dist) };
+    }
+
+    updateObjectiveUi() {
+      TC.ui.setMoney(Math.round(STORE.data.money).toLocaleString('pt-BR'));
+
+      const m = STORE.data.mission;
+      if (!m) {
+        TC.ui.setMission(null);
+        TC.ui.setNav(null);
+        this.setBeacon(null);
+        return;
+      }
+      const c = STORE.contract(m.id);
+      const pickup = m.stage === 'pickup';
+      const zoneKey = pickup ? 'cargo' : c.to;
+      const dest = STORE.DEST[c.to];
+
+      let time;
+      let cls = '';
+      if (pickup) {
+        time = 'Prazo ' + fmtTime(c.time);
+      } else if (m.timeLeft < 0) {
+        time = 'ATRASADO ' + fmtTime(-m.timeLeft);
+        cls = 'late';
+      } else {
+        time = fmtTime(m.timeLeft);
+        if (m.timeLeft < 20) cls = 'warn';
+      }
+
+      TC.ui.setMission({
+        title: c.title,
+        step: pickup ? '1/2 · Pare na Zona de Carga para carregar' : '2/2 · Entregue em ' + dest.name,
+        time: time,
+        timeClass: cls,
+        progress: this.dwell > 0.05 ? this.dwell / DWELL_TIME : null,
+        progressLabel: pickup ? 'Carregando…' : 'Descarregando…',
+      });
+
+      if (this.indoor) {
+        TC.ui.setNav(null);
+        this.setBeacon(null);
+      } else {
+        TC.ui.setNav(this.navInfo(zoneKey));
+        this.setBeacon(zoneKey);
+      }
+    }
+
+    /* ---------------- PERSONAGEM A PÉ ---------------- */
     updatePlayer(dt, inp) {
       const p = this.p;
       const A = this.walkArea();
@@ -1164,11 +1234,11 @@
       p.y = t.cy + lx * sin + ly * cos;
     }
 
-    // [Fase 2] Jogador x prédio/árvores/sebes (fora) ou móveis (dentro)
+    // Jogador x objetos sólidos do segmento (ou móveis da sala)
     collidePlayerSolids() {
       const p = this.p;
       const R = PLAYER.radius;
-      const list = this.indoor ? this.inSolids : this.outSolids;
+      const list = this.indoor ? this.inSolids : this.solids[this.seg.id];
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
         const qx = clamp(p.x, s.x, s.x + s.w);
@@ -1212,7 +1282,9 @@
       if (!this.indoor) {
         const d = this.doorWorld();
         cands.push({ id: 'truck-enter', label: 'Entrar no Caminhão', x: d.x, y: d.y, r: PLAYER.enterDist });
-        cands.push({ id: 'office-enter', label: 'Entrar no Prédio', x: OFFICE_DOOR.x, y: OFFICE_DOOR.y, r: OFFICE_DOOR.r });
+        if (this.seg.id === 'city') {
+          cands.push({ id: 'office-enter', label: 'Entrar no Prédio', x: OFFICE_DOOR.x, y: OFFICE_DOOR.y, r: OFFICE_DOOR.r });
+        }
       } else {
         cands.push({ id: 'pc-use', label: 'Usar Computador', x: ROOM_PC.x, y: ROOM_PC.y, r: ROOM_PC.r });
         cands.push({ id: 'office-exit', label: 'Sair do Prédio', x: ROOM_EXIT.x, y: ROOM_EXIT.y, r: ROOM_EXIT.r });
@@ -1228,8 +1300,7 @@
       return { id: best.id, label: best.label };
     }
 
-    // [UX] O botão contextual é FIXO no canto inferior direito (definido no CSS).
-    // Aqui só decidimos se ele aparece (perto de um objeto interativo) ou some.
+    // O botão contextual é FIXO no canto inferior direito (CSS). Aqui só liga/desliga.
     positionAction() {
       const it = this.interaction;
       TC.ui.setAction(it ? { label: it.label } : null);
@@ -1254,7 +1325,7 @@
       }
     }
 
-    /* ---------------- ENTRAR / SAIR DO CAMINHÃO (Fase 1) ---------------- */
+    /* ---------------- ENTRAR / SAIR DO CAMINHÃO ---------------- */
     tryExit() {
       const t = this.truck;
       if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) {
@@ -1262,8 +1333,9 @@
         return;
       }
       const R = PLAYER.radius;
+      const A = this.walkArea();
       const pos = toWorld(t, TRUCK.door.x, -(TRUCK.halfW + R + 10));
-      this.p.setPosition(clamp(pos.x, R, WORLD.w - R), clamp(pos.y, R, WORLD.h - R));
+      this.p.setPosition(clamp(pos.x, A.x0, A.x1), clamp(pos.y, A.y0, A.y1));
       this.p.rotation = t.heading - Math.PI / 2; // olhando para fora da porta
       this.p.setVisible(true);
 
@@ -1281,7 +1353,7 @@
       TC.ui.setDriving(true);
     }
 
-    /* ---------------- ESCRITÓRIO: ENTRAR / SAIR (transição com fade) ---------------- */
+    /* ---------------- ESCRITÓRIO: ENTRAR / SAIR (fade) ---------------- */
     enterBuilding() {
       this.busy = true;
       this.clearTarget();
@@ -1310,8 +1382,8 @@
         this.indoor = false;
         this.p.setPosition(OFFICE_EXIT.x, OFFICE_EXIT.y);
         this.p.rotation = Math.PI / 2; // saiu olhando para a rua
-        cam.setBackgroundColor('rgba(0,0,0,0)');
-        cam.setBounds(0, 0, WORLD.w, WORLD.h);
+        cam.setBackgroundColor('#1d2b20');
+        this.applyBounds();
         this.applyZoom();
         cam.centerOn(this.p.x, this.p.y);
         cam.startFollow(this.p, true, 0.08, 0.08);
@@ -1327,11 +1399,16 @@
       this.clearTarget();
       this.input.keyboard.enabled = false; // WASD/E não mexem no jogo enquanto o sistema está aberto
       TC.ui.resetInputs();
+      const before = STORE.data.mission ? STORE.data.mission.id : null;
       TC.pc.open(() => {
         this.uiOpen = false;
         this.input.keyboard.enabled = true;
         this.input.keyboard.resetKeys();
         TC.consumeAction();
+        this.refreshTruckLook();
+        const after = STORE.data.mission ? STORE.data.mission.id : null;
+        if (!before && after) TC.ui.flash('Contrato aceito! Vá até a Zona de Carga (amarela).', 3400);
+        else if (before && !after) TC.ui.flash('Contrato cancelado.', 2000);
       });
     }
 
@@ -1351,22 +1428,17 @@
 
     updateZonesAndHud() {
       const t = this.truck;
-      const hx = TRUCK.halfL;
-      const hy = TRUCK.halfW;
-      const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map((c) => toWorld(t, c[0], c[1]));
+      const corners = this.truckCorners();
 
       let status = '';
-      Object.keys(ZONES).forEach((key) => {
-        const z = ZONES[key];
-        const inside = corners.every(
-          (pt) => pt.x >= z.x && pt.x <= z.x + z.w && pt.y >= z.y && pt.y <= z.y + z.h
-        );
-        if (inside !== this.zoneInside[key]) {
+      ZONE_KEYS.forEach((key) => {
+        const inside = this.zoneContains(corners, key);
+        if (inside !== !!this.zoneInside[key]) {
           this.zoneInside[key] = inside;
           this.drawZone(key, inside);
         }
         if (inside) {
-          status = (Math.abs(t.speed) < 5 ? 'ESTACIONADO: ' : 'Na ') + z.label;
+          status = (Math.abs(t.speed) < 5 ? 'ESTACIONADO: ' : 'Na ') + ZONES[key].label;
         }
       });
 
@@ -1378,9 +1450,11 @@
         const kmh = Math.round(Math.abs(t.speed) / 4);
         const gear = t.speed < -1 ? 'R' : Math.abs(t.speed) < 1 ? 'N' : 'D';
         const steerDeg = Math.round(Phaser.Math.RadToDeg(t.steer));
-        line = kmh + ' km/h · ' + gear + ' · ' + steerDeg + '°';
+        const cond = Math.round(STORE.data.condition);
+        line = (this.seg.id === 'city' ? '' : this.seg.name + ' · ') + kmh + ' km/h · ' + gear + ' · ' + steerDeg + '°';
+        if (cond < 60) line += ' · Cond. ' + cond + '%';
       } else {
-        line = 'A pé';
+        line = this.seg.id === 'city' ? 'A pé' : 'A pé · ' + this.seg.name;
       }
       TC.ui.setHud(line, status);
 
