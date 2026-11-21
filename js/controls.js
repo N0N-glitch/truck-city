@@ -1,7 +1,8 @@
 /* ============================================================
-   TRUCK CITY - controls.js  (Fase 2 + botão contextual fixo)
-   Setup de dispositivo, HUD, botão contextual e controles mobile.
-   Expõe tudo em window.TC para o game.js e o pc.js usarem.
+   TRUCK CITY - controls.js  (Fase 3)
+   Setup de dispositivo, HUD (dinheiro, missão, seta de navegação,
+   banner, resumo), botão contextual e controles mobile.
+   Expõe tudo em window.TC para o game.js, store.js e pc.js.
    ============================================================ */
 (function () {
   'use strict';
@@ -33,10 +34,25 @@
     stepDevice: $('#step-device'),
     stepMobile: $('#step-mobile'),
     hud: $('#hud'),
+    money: $('#money-val'),
     line: $('#hud-line'),
     status: $('#hud-status'),
     help: $('#hud-help'),
     msg: $('#hud-msg'),
+    mission: $('#mission-box'),
+    mTime: $('#m-time'),
+    mTitle: $('#m-title'),
+    mStep: $('#m-step'),
+    mProg: $('#m-prog'),
+    mProgBar: $('#m-prog-bar'),
+    mProgLabel: $('#m-prog-label'),
+    mNav: $('#m-nav'),
+    navArrow: $('#nav-arrow'),
+    navDist: $('#nav-dist'),
+    banner: $('#banner'),
+    bannerTitle: $('#banner-title'),
+    bannerSub: $('#banner-sub'),
+    summary: $('#summary'),
     controls: $('#controls'),
     wheelWrap: $('#wheel-wrap'),
     wheel: $('#wheel'),
@@ -158,6 +174,11 @@
     }
   }
 
+  // Dinheiro (texto já formatado, ex.: "1.250")
+  TC.ui.setMoney = function (text) {
+    setText('money', el.money, text);
+  };
+
   // Linha principal do HUD + linha de status (ex.: "ESTACIONADO: ZONA DE CARGA")
   TC.ui.setHud = function (line, status) {
     setText('line', el.line, line);
@@ -172,7 +193,92 @@
     flashTimer = setTimeout(() => el.msg.classList.remove('show'), ms || 2200);
   };
 
-  // info = null (esconde) ou { label } (mostra). A posição é fixa e definida só pelo CSS.
+  // Banner grande ao entrar numa área (ex.: BR-116)
+  TC.ui.banner = function (title, sub) {
+    el.bannerTitle.textContent = title;
+    el.bannerSub.textContent = sub || '';
+    el.banner.classList.remove('show');
+    void el.banner.offsetWidth; // reinicia a animação CSS
+    el.banner.classList.add('show');
+  };
+
+  // info = null (esconde) ou { title, step, time, timeClass, progress (0..1|null), progressLabel }
+  TC.ui.setMission = function (info) {
+    if (!info) {
+      if (cache.missionOn) {
+        el.mission.classList.add('hidden');
+        cache.missionOn = false;
+      }
+      return;
+    }
+    if (!cache.missionOn) {
+      el.mission.classList.remove('hidden');
+      cache.missionOn = true;
+    }
+    setText('mTitle', el.mTitle, info.title);
+    setText('mStep', el.mStep, info.step);
+    setText('mTime', el.mTime, info.time || '');
+    const cls = 'm-time ' + (info.timeClass || '');
+    if (cache.mTimeCls !== cls) {
+      cache.mTimeCls = cls;
+      el.mTime.className = cls;
+    }
+    if (info.progress == null) {
+      if (cache.progOn) {
+        el.mProg.classList.add('hidden');
+        cache.progOn = false;
+      }
+    } else {
+      if (!cache.progOn) {
+        el.mProg.classList.remove('hidden');
+        cache.progOn = true;
+      }
+      const w = Math.round(clamp(info.progress, 0, 1) * 100) + '%';
+      if (cache.progW !== w) {
+        cache.progW = w;
+        el.mProgBar.style.width = w;
+      }
+      setText('mProgLabel', el.mProgLabel, info.progressLabel || '');
+    }
+  };
+
+  // info = null (esconde) ou { angle (rad), dist (texto) }
+  TC.ui.setNav = function (info) {
+    if (!info) {
+      if (cache.navOn) {
+        el.mNav.classList.add('hidden');
+        cache.navOn = false;
+      }
+      return;
+    }
+    if (!cache.navOn) {
+      el.mNav.classList.remove('hidden');
+      cache.navOn = true;
+    }
+    const deg = Math.round((info.angle * 180) / Math.PI);
+    if (cache.navDeg !== deg) {
+      cache.navDeg = deg;
+      el.navArrow.style.transform = 'rotate(' + deg + 'deg)';
+    }
+    setText('navDist', el.navDist, info.dist);
+  };
+
+  // Resumo de entrega (HTML pronto). Fecha ao tocar em [data-close] ou após 10 s.
+  let summaryTimer = null;
+  TC.ui.showSummary = function (html) {
+    el.summary.innerHTML = html;
+    el.summary.classList.remove('hidden');
+    clearTimeout(summaryTimer);
+    summaryTimer = setTimeout(() => el.summary.classList.add('hidden'), 10000);
+  };
+  el.summary.addEventListener('click', (e) => {
+    if (e.target.closest('[data-close]')) {
+      clearTimeout(summaryTimer);
+      el.summary.classList.add('hidden');
+    }
+  });
+
+  // Botão contextual: info = null (esconde) ou { label } (mostra). Posição fixa via CSS.
   TC.ui.setAction = function (info) {
     if (!info) {
       if (cache.actionOn) {
