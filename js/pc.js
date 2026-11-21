@@ -91,7 +91,7 @@
     el.clock.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
 
-  /* ---------- CASCA (barra superior, ícones, dock) ---------- */
+  /* ---------- CASCA (barra superior, ícones, dock, widgets) ---------- */
   function renderChrome() {
     el.company.textContent = S.data.company;
     el.money.textContent = S.fmt(S.data.money);
@@ -278,7 +278,7 @@
       ['Direção', '+' + Math.round((mods.steerRate - 1) * 100) + '%', Math.min(1, mods.steerRate / 1.4)],
     ];
 
-    let left =
+    const left =
       '<div class="panel-card"><h3>' + esc(d.company) + ' · Caminhão-baú</h3>' + truckSvg(d.paint) +
       '<div class="row-between"><span>Condição</span><b>' + cond + '%</b></div>' +
       '<div class="meter cond"><i class="' + condCls + '" style="width:' + cond + '%"></i></div>' +
@@ -451,7 +451,7 @@
     else close();
   });
 
-  // Atualiza a tela quando o estado muda (apenas se estiver aberta)
+  // Atualiza barra superior e widgets quando o estado muda (apenas se aberto)
   S.subscribe(() => {
     if (!ui.open) return;
     renderChrome();
@@ -463,4 +463,29 @@
     ui.open = true;
     ui.onClose = onClose || null;
     ui.app = null;
-    ui.tab = '
+    ui.tab = 'available';
+    ui.confirmReset = false;
+    el.root.classList.remove('hidden');
+    el.win.classList.add('hidden');
+    renderChrome();
+    renderIcons();
+    renderDock();
+    renderWidgets();
+    tickClock();
+    clearInterval(ui.clock);
+    ui.clock = setInterval(tickClock, 15000);
+  }
+
+  function close() {
+    if (!ui.open) return;
+    ui.open = false;
+    clearInterval(ui.clock);
+    el.root.classList.add('hidden');
+    S.save();
+    const cb = ui.onClose;
+    ui.onClose = null;
+    if (cb) cb();
+  }
+
+  TC.pc = { open: open, close: close };
+})();
