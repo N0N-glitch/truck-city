@@ -1,41 +1,39 @@
 /* ============================================================
-   TRUCK CITY - store.js  (Fase 3)
-   Economia, contratos/missões, condição do caminhão, upgrades,
-   pintura e salvamento (localStorage).
-   Uso: TC.store.data (estado), TC.store.acceptContract(id), etc.
-   Sempre leia o estado por TC.store.data (a referência muda no reset).
+   TRUCK CITY - store.js  (Atualización 4.0)
+   Economia, contratos, estoque, frota, níveis até 20 e missões especiais.
    ============================================================ */
 (function () {
   'use strict';
 
   const TC = window.TC;
-  const KEY = 'truckcity.save.v1';
+  const KEY = 'truckcity.save.v4';
 
-  /* ---------- DADOS ESTÁTICOS ---------- */
-
-  // Destinos possíveis das entregas (a coleta é sempre na Zona de Carga da cidade)
   const DEST = {
     work:      { name: 'Zona de Obra',    where: 'Truck City',                       far: false },
     warehouse: { name: 'Armazém Central', where: 'Distrito Industrial · via BR-116', far: true  },
     port:      { name: 'Porto Seco',      where: 'Distrito Industrial · via BR-116', far: true  },
   };
 
-  // time = prazo em segundos (conta a partir do carregamento)
   const CONTRACTS = [
-    { id: 'c1', client: 'Construtora Aurora',   title: 'Cimento para o Centro Cívico', cargo: 'Cimento · 40 sacos',      color: '#b9b9b9', to: 'work',      pay: 900,  time: 110, risk: 'baixo', level: 1 },
-    { id: 'c2', client: 'Prefeitura Municipal', title: 'Areia para a Praça da Matriz', cargo: 'Areia · 8 m³',            color: '#d8b66a', to: 'work',      pay: 1300, time: 100, risk: 'baixo', level: 1 },
-    { id: 'c4', client: 'Porto Seco Ltda',      title: 'Reposição do Armazém Central', cargo: 'Paletes · 12 un',         color: '#d9a441', to: 'warehouse', pay: 2800, time: 160, risk: 'medio', level: 1 },
-    { id: 'c3', client: 'Madeireira Boa Vista', title: 'Entrega expressa de madeira',  cargo: 'Madeira · 60 peças',      color: '#a0693a', to: 'work',      pay: 2100, time: 70,  risk: 'alto',  level: 2 },
-    { id: 'c5', client: 'TechLog',              title: 'Eletrônicos para o Armazém',   cargo: 'Eletrônicos · 30 caixas', color: '#4f8cff', to: 'warehouse', pay: 4000, time: 150, risk: 'alto',  level: 2 },
-    { id: 'c6', client: 'Mar & Terra Export',   title: 'Contêiner para o Porto Seco',  cargo: 'Contêiner · 1 un',        color: '#2fb7a0', to: 'port',      pay: 4600, time: 170, risk: 'medio', level: 2 },
-    { id: 'c8', client: 'Metalúrgica Norte',    title: 'Máquinas pesadas',             cargo: 'Maquinário · 3 un',       color: '#8a8fa3', to: 'warehouse', pay: 5600, time: 180, risk: 'medio', level: 3 },
-    { id: 'c7', client: 'PetroSul',             title: 'Combustível especial',         cargo: 'Tambores · 20 un',        color: '#e4572e', to: 'port',      pay: 6800, time: 160, risk: 'alto',  level: 3 },
+    { id: 'c1', client: 'Construtora Aurora',   title: 'Cimento para o Centro Cívico', cargo: 'Cimento · 40 sacos',      color: '#b9b9b9', to: 'work',      pay: 900,  time: 110, risk: 'baixo', level: 1, stockCost: 200 },
+    { id: 'c2', client: 'Prefeitura Municipal', title: 'Areia para a Praça da Matriz', cargo: 'Areia · 8 m³',            color: '#d8b66a', to: 'work',      pay: 1300, time: 100, risk: 'baixo', level: 1, stockCost: 300 },
+    { id: 'c4', client: 'Porto Seco Ltda',      title: 'Reposição do Armazém Central', cargo: 'Paletes · 12 un',         color: '#d9a441', to: 'warehouse', pay: 2800, time: 160, risk: 'medio', level: 1, stockCost: 600 },
+    { id: 'c3', client: 'Madeireira Boa Vista', title: 'Entrega expressa de madeira',  cargo: 'Madeira · 60 peças',      color: '#a0693a', to: 'work',      pay: 2100, time: 70,  risk: 'alto',  level: 2, stockCost: 500 },
+    { id: 'c5', client: 'TechLog',              title: 'Eletrônicos para o Armazém',   cargo: 'Eletrônicos · 30 caixas', color: '#4f8cff', to: 'warehouse', pay: 4000, time: 150, risk: 'alto',  level: 2, stockCost: 1000 },
+    { id: 'c6', client: 'Mar & Terra Export',   title: 'Contêiner para o Porto Seco',  cargo: 'Contêiner · 1 un',        color: '#2fb7a0', to: 'port',      pay: 4600, time: 170, risk: 'medio', level: 2, stockCost: 1200 },
+    { id: 'c8', client: 'Metalúrgica Norte',    title: 'Máquinas pesadas',             cargo: 'Maquinário · 3 un',       color: '#8a8fa3', to: 'warehouse', pay: 5600, time: 180, risk: 'medio', level: 3, stockCost: 1500 },
+    { id: 'c7', client: 'PetroSul',             title: 'Combustível especial',         cargo: 'Tambores · 20 un',        color: '#e4572e', to: 'port',      pay: 6800, time: 160, risk: 'alto',  level: 3, stockCost: 1800 },
+    // Contratos de Carga Pesada (Exigem Frota)
+    { id: 'cp1', client: 'Mega Construtora',    title: 'Super Lote de Vigas de Aço',   cargo: 'Vigas · Exige Frota (3)', color: '#ff5722', to: 'work',      pay: 18000, time: 240, risk: 'alto', level: 5, fleetReq: 3, stockCost: 4000 },
   ];
 
   const UPGRADES = {
     engine:   { name: 'Motor',   desc: '+8% velocidade máxima e +10% aceleração por nível', costs: [1500, 3500, 7000] },
     brakes:   { name: 'Freios',  desc: '+12% de força de frenagem por nível',               costs: [1000, 2500, 5000] },
     steering: { name: 'Direção', desc: '+10% de resposta do volante e curvas melhores em velocidade', costs: [1200, 3000, 6000] },
+    mobile:   { name: 'Celular Móvel', desc: 'Acesse a loja e contratos de qualquer lugar do mapa', costs: [25000] },
+    flashlight: { name: 'Lanterna', desc: 'Permite explorar o porão escuro atrás do escritório', costs: [500] },
+    fleetManager: { name: 'Funcionário Responsável', desc: 'Permite despachar até 5 caminhões da frota para entregas automáticas', costs: [50000] },
   };
 
   const PAINTS = [
@@ -47,27 +45,27 @@
     { color: '#2b2f36', name: 'Grafite' },
   ];
   const PAINT_COST = 200;
-
-  const LEVEL_STEP = 3;   // a cada 3 entregas sobe 1 nível
-  const MAX_LEVEL = 5;
+  const MAX_LEVEL = 20;
   const REPAIR_PER_POINT = 15;
 
-  /* ---------- ESTADO ---------- */
   function fresh() {
     return {
-      v: 1,
+      v: 4,
       company: 'Transportes Aurora',
-      money: 500,
+      money: 1500,
       earned: 0,
       spent: 0,
       deliveries: 0,
       condition: 100,
-      upgrades: { engine: 0, brakes: 0, steering: 0 },
+      upgrades: { engine: 0, brakes: 0, steering: 0, mobile: 0, flashlight: 0, fleetManager: 0 },
       paint: '#d64541',
       paintsOwned: ['#d64541'],
-      mission: null,   // { id, stage:'pickup'|'transit', timeLeft, damage }
-      log: [],         // { t, label, amount }
-      history: [],     // { t, title, total }
+      stock: 5, // Estoque inicial de mercadorias
+      fleetCount: 0, // Número de caminhões na frota (máx 5)
+      storyState: 'none', // 'none' | 'met' | 'refused' | 'accepted' | 'completed'
+      mission: null,
+      log: [],
+      history: [],
     };
   }
 
@@ -80,11 +78,11 @@
       Object.keys(d).forEach((k) => {
         if (s[k] !== undefined && typeof s[k] === typeof d[k]) d[k] = s[k];
       });
-      d.upgrades = Object.assign({ engine: 0, brakes: 0, steering: 0 }, s.upgrades || {});
+      d.upgrades = Object.assign({ engine: 0, brakes: 0, steering: 0, mobile: 0, flashlight: 0, fleetManager: 0 }, s.upgrades || {});
       if (!Array.isArray(d.log)) d.log = [];
       if (!Array.isArray(d.history)) d.history = [];
       if (!Array.isArray(d.paintsOwned) || !d.paintsOwned.length) d.paintsOwned = [d.paint];
-      if (d.mission && !contractById(d.mission.id)) d.mission = null; // contrato inexistente
+      if (d.mission && !contractById(d.mission.id)) d.mission = null;
       return d;
     } catch (e) {
       return fresh();
@@ -106,7 +104,6 @@
     PAINTS: PAINTS,
     PAINT_COST: PAINT_COST,
     MAX_LEVEL: MAX_LEVEL,
-    LEVEL_STEP: LEVEL_STEP,
     data: null,
 
     fmt: function (n) {
@@ -115,17 +112,15 @@
 
     subscribe: function (fn) { subs.push(fn); },
 
-    // Avisa os assinantes (tela do computador) e marca para salvar
     touch: function () {
       dirty = true;
-      subs.forEach((fn) => { try { fn(); } catch (e) { /* ignora */ } });
+      subs.forEach((fn) => { try { fn(); } catch (e) {} });
     },
 
-    // Só marca para salvar (uso por frame, sem redesenhar a interface)
     markDirty: function () { dirty = true; },
 
     save: function () {
-      try { localStorage.setItem(KEY, JSON.stringify(store.data)); } catch (e) { /* ignora */ }
+      try { localStorage.setItem(KEY, JSON.stringify(store.data)); } catch (e) {}
       dirty = false;
     },
 
@@ -135,21 +130,33 @@
       store.touch();
     },
 
-    /* ----- nível / reputação ----- */
+    // Curva de dificuldade progressiva até o nível 20
     level: function () {
-      return Math.min(MAX_LEVEL, 1 + Math.floor(store.data.deliveries / LEVEL_STEP));
+      let lvl = 1;
+      let req = 3;
+      let count = store.data.deliveries;
+      while (lvl < MAX_LEVEL && count >= req) {
+        count -= req;
+        lvl++;
+        req += 2; // Fica mais difícil a cada nível
+      }
+      return Math.min(MAX_LEVEL, lvl);
     },
-    // progresso dentro do nível atual: { done, need, pct }
+
     levelProgress: function () {
       const lvl = store.level();
-      if (lvl >= MAX_LEVEL) return { done: LEVEL_STEP, need: LEVEL_STEP, pct: 1, max: true };
-      const done = store.data.deliveries - (lvl - 1) * LEVEL_STEP;
-      return { done: done, need: LEVEL_STEP, pct: done / LEVEL_STEP, max: false };
+      if (lvl >= MAX_LEVEL) return { done: 10, need: 10, pct: 1, max: true };
+      let req = 3;
+      let count = store.data.deliveries;
+      for (let i = 1; i < lvl; i++) {
+        count -= req;
+        req += 2;
+      }
+      return { done: Math.max(0, count), need: req, pct: Math.min(1, Math.max(0, count / req)), max: false };
     },
 
     contract: contractById,
 
-    /* ----- finanças ----- */
     logTx: function (label, amount) {
       store.data.log.unshift({ t: Date.now(), label: label, amount: amount });
       if (store.data.log.length > 40) store.data.log.length = 40;
@@ -164,20 +171,21 @@
       return true;
     },
 
-    /* ----- missões ----- */
     acceptContract: function (id) {
       const d = store.data;
       const c = contractById(id);
       if (!c) return { ok: false, msg: 'Contrato não encontrado.' };
       if (d.mission) return { ok: false, msg: 'Termine ou cancele o contrato atual primeiro.' };
       if (c.level > store.level()) return { ok: false, msg: 'Nível da transportadora insuficiente.' };
+      if (d.stock < 1) return { ok: false, msg: 'Estoque esgotado! Compre mercadorias na Loja antes de aceitar.' };
+      
+      d.stock -= 1; // Consome 1 unidade de estoque
       d.mission = { id: c.id, stage: 'pickup', timeLeft: null, damage: 0 };
       store.touch();
       store.save();
       return { ok: true, msg: 'Contrato aceito! Vá até a Zona de Carga.' };
     },
 
-    // Cancelar custa 10% do valor do contrato (mínimo $ 50, limitado ao saldo)
     cancelPenalty: function () {
       const m = store.data.mission;
       if (!m) return 0;
@@ -197,10 +205,9 @@
       d.mission = null;
       store.touch();
       store.save();
-      return { ok: true, msg: 'Contrato cancelado. Multa: ' + store.fmt(pen) };
+      return { ok: true, msg: 'Contrato cancelado.' };
     },
 
-    // Chamado pelo jogo ao descarregar no destino. Devolve o resumo do pagamento.
     completeMission: function () {
       const d = store.data;
       const m = d.mission;
@@ -210,9 +217,9 @@
 
       const base = c.pay;
       const left = m.timeLeft == null ? 0 : m.timeLeft;
-      const bonus = left >= c.time * 0.5 ? Math.round(base * 0.2) : 0;   // chegou com 50%+ do prazo sobrando
-      const late = left < 0 ? Math.round(base * 0.25) : 0;               // passou do prazo
-      const dmgPct = Math.min(40, (m.damage || 0) * 1.5);                // até 40% de desconto
+      const bonus = left >= c.time * 0.5 ? Math.round(base * 0.2) : 0;
+      const late = left < 0 ? Math.round(base * 0.25) : 0;
+      const dmgPct = Math.min(40, (m.damage || 0) * 1.5);
       const dmg = Math.round((base * dmgPct) / 100);
       const total = Math.max(0, base + bonus - late - dmg);
 
@@ -234,8 +241,6 @@
       };
     },
 
-    /* ----- caminhão ----- */
-    // Dano de colisão: reduz a condição e acumula na missão em trânsito
     damage: function (amount) {
       const d = store.data;
       d.condition = Math.max(0, d.condition - amount);
@@ -251,8 +256,8 @@
 
     repair: function () {
       const cost = store.repairCost();
-      if (cost === 0) return { ok: false, msg: 'O caminhão já está em perfeito estado.' };
-      if (!store.spend(cost, 'Reparo do caminhão')) return { ok: false, msg: 'Saldo insuficiente para o reparo.' };
+      if (cost === 0) return { ok: false, msg: 'O caminhão já está perfeito.' };
+      if (!store.spend(cost, 'Reparo')) return { ok: false, msg: 'Saldo insuficiente.' };
       store.data.condition = 100;
       store.touch();
       store.save();
@@ -262,26 +267,48 @@
     upgradeLevel: function (key) { return store.data.upgrades[key] || 0; },
 
     upgradeCost: function (key) {
+      const u = UPGRADES[key];
       const lvl = store.upgradeLevel(key);
-      const costs = UPGRADES[key].costs;
-      return lvl >= costs.length ? null : costs[lvl];
+      if (Array.isArray(u.costs)) {
+        return lvl >= u.costs.length ? null : u.costs[lvl];
+      }
+      return lvl > 0 ? null : u.costs;
     },
 
     buyUpgrade: function (key) {
       const cost = store.upgradeCost(key);
-      if (cost == null) return { ok: false, msg: 'Nível máximo atingido.' };
+      if (cost == null) return { ok: false, msg: 'Já adquirido.' };
       if (!store.spend(cost, 'Upgrade: ' + UPGRADES[key].name)) return { ok: false, msg: 'Saldo insuficiente.' };
       store.data.upgrades[key] = store.upgradeLevel(key) + 1;
       store.touch();
       store.save();
-      return { ok: true, msg: UPGRADES[key].name + ' melhorado!' };
+      return { ok: true, msg: UPGRADES[key].name + ' adquirido!' };
+    },
+
+    buyStock: function (qty, cost) {
+      if (!store.spend(cost, 'Compra de Estoque')) return { ok: false, msg: 'Saldo insuficiente.' };
+      store.data.stock += qty;
+      store.touch();
+      store.save();
+      return { ok: true, msg: 'Estoque reposto com sucesso!' };
+    },
+
+    buyTruck: function () {
+      const d = store.data;
+      if (d.fleetCount >= 5) return { ok: false, msg: 'Limite máximo de 5 caminhões na frota atingido.' };
+      const cost = 20000 + d.fleetCount * 10000;
+      if (!store.spend(cost, 'Contratação de Caminhão da Frota')) return { ok: false, msg: 'Saldo insuficiente.' };
+      d.fleetCount += 1;
+      store.touch();
+      store.save();
+      return { ok: true, msg: 'Novo caminhão adicionado à frota!' };
     },
 
     setPaint: function (color) {
       const d = store.data;
-      if (d.paint === color) return { ok: true, msg: 'Essa já é a cor atual.' };
+      if (d.paint === color) return { ok: true, msg: 'Cor atual.' };
       if (d.paintsOwned.indexOf(color) === -1) {
-        if (!store.spend(PAINT_COST, 'Pintura do caminhão')) return { ok: false, msg: 'Saldo insuficiente.' };
+        if (!store.spend(PAINT_COST, 'Pintura')) return { ok: false, msg: 'Saldo insuficiente.' };
         d.paintsOwned.push(color);
       }
       d.paint = color;
@@ -292,18 +319,17 @@
 
     rename: function (name) {
       const n = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 24);
-      if (n.length < 3) return { ok: false, msg: 'Use pelo menos 3 caracteres.' };
+      if (n.length < 3) return { ok: false, msg: 'Mínimo 3 caracteres.' };
       store.data.company = n;
       store.touch();
       store.save();
-      return { ok: true, msg: 'Nome da transportadora atualizado.' };
+      return { ok: true, msg: 'Nome atualizado.' };
     },
 
-    // Multiplicadores de desempenho usados pela física do caminhão
     mods: function () {
       const d = store.data;
       const u = d.upgrades;
-      const perf = d.condition < 30 ? 0.8 : 1; // caminhão muito danificado perde desempenho
+      const perf = d.condition < 30 ? 0.8 : 1;
       return {
         maxFwd: (1 + 0.08 * u.engine) * perf,
         accel: (1 + 0.10 * u.engine) * perf,
@@ -318,7 +344,6 @@
   store.data = load();
   TC.store = store;
 
-  // Salva sozinho (a cada 4 s se houve mudança) e ao sair/ocultar a aba
   setInterval(function () { if (dirty) store.save(); }, 4000);
   window.addEventListener('pagehide', store.save);
   document.addEventListener('visibilitychange', function () { if (document.hidden) store.save(); });
