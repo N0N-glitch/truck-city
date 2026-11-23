@@ -1,12 +1,13 @@
 /* ============================================================
-   TRUCK CITY - store.js  (Atualización 4.0)
-   Economia, contratos, estoque, frota, níveis até 20 e missões especiais.
+   TRUCK CITY - store.js  (Fase 3)
+   Economia, contratos/missões, condição do caminhão, upgrades,
+   pintura e salvamento (localStorage).
    ============================================================ */
 (function () {
   'use strict';
 
   const TC = window.TC;
-  const KEY = 'truckcity.save.v4';
+  const KEY = 'truckcity.save.v1';
 
   const DEST = {
     work:      { name: 'Zona de Obra',    where: 'Truck City',                       far: false },
@@ -15,25 +16,20 @@
   };
 
   const CONTRACTS = [
-    { id: 'c1', client: 'Construtora Aurora',   title: 'Cimento para o Centro Cívico', cargo: 'Cimento · 40 sacos',      color: '#b9b9b9', to: 'work',      pay: 900,  time: 110, risk: 'baixo', level: 1, stockCost: 200 },
-    { id: 'c2', client: 'Prefeitura Municipal', title: 'Areia para a Praça da Matriz', cargo: 'Areia · 8 m³',            color: '#d8b66a', to: 'work',      pay: 1300, time: 100, risk: 'baixo', level: 1, stockCost: 300 },
-    { id: 'c4', client: 'Porto Seco Ltda',      title: 'Reposição do Armazém Central', cargo: 'Paletes · 12 un',         color: '#d9a441', to: 'warehouse', pay: 2800, time: 160, risk: 'medio', level: 1, stockCost: 600 },
-    { id: 'c3', client: 'Madeireira Boa Vista', title: 'Entrega expressa de madeira',  cargo: 'Madeira · 60 peças',      color: '#a0693a', to: 'work',      pay: 2100, time: 70,  risk: 'alto',  level: 2, stockCost: 500 },
-    { id: 'c5', client: 'TechLog',              title: 'Eletrônicos para o Armazém',   cargo: 'Eletrônicos · 30 caixas', color: '#4f8cff', to: 'warehouse', pay: 4000, time: 150, risk: 'alto',  level: 2, stockCost: 1000 },
-    { id: 'c6', client: 'Mar & Terra Export',   title: 'Contêiner para o Porto Seco',  cargo: 'Contêiner · 1 un',        color: '#2fb7a0', to: 'port',      pay: 4600, time: 170, risk: 'medio', level: 2, stockCost: 1200 },
-    { id: 'c8', client: 'Metalúrgica Norte',    title: 'Máquinas pesadas',             cargo: 'Maquinário · 3 un',       color: '#8a8fa3', to: 'warehouse', pay: 5600, time: 180, risk: 'medio', level: 3, stockCost: 1500 },
-    { id: 'c7', client: 'PetroSul',             title: 'Combustível especial',         cargo: 'Tambores · 20 un',        color: '#e4572e', to: 'port',      pay: 6800, time: 160, risk: 'alto',  level: 3, stockCost: 1800 },
-    // Contratos de Carga Pesada (Exigem Frota)
-    { id: 'cp1', client: 'Mega Construtora',    title: 'Super Lote de Vigas de Aço',   cargo: 'Vigas · Exige Frota (3)', color: '#ff5722', to: 'work',      pay: 18000, time: 240, risk: 'alto', level: 5, fleetReq: 3, stockCost: 4000 },
+    { id: 'c1', client: 'Construtora Aurora',   title: 'Cimento para o Centro Cívico', cargo: 'Cimento · 40 sacos',      color: '#b9b9b9', to: 'work',      pay: 900,  time: 110, risk: 'baixo', level: 1 },
+    { id: 'c2', client: 'Prefeitura Municipal', title: 'Areia para a Praça da Matriz', cargo: 'Areia · 8 m³',            color: '#d8b66a', to: 'work',      pay: 1300, time: 100, risk: 'baixo', level: 1 },
+    { id: 'c4', client: 'Porto Seco Ltda',      title: 'Reposição do Armazém Central', cargo: 'Paletes · 12 un',         color: '#d9a441', to: 'warehouse', pay: 2800, time: 160, risk: 'medio', level: 1 },
+    { id: 'c3', client: 'Madeireira Boa Vista', title: 'Entrega expressa de madeira',  cargo: 'Madeira · 60 peças',      color: '#a0693a', to: 'work',      pay: 2100, time: 70,  risk: 'alto',  level: 2 },
+    { id: 'c5', client: 'TechLog',              title: 'Eletrônicos para o Armazém',   cargo: 'Eletrônicos · 30 caixas', color: '#4f8cff', to: 'warehouse', pay: 4000, time: 150, risk: 'alto',  level: 2 },
+    { id: 'c6', client: 'Mar & Terra Export',   title: 'Contêiner para o Porto Seco',  cargo: 'Contêiner · 1 un',        color: '#2fb7a0', to: 'port',      pay: 4600, time: 170, risk: 'medio', level: 2 },
+    { id: 'c8', client: 'Metalúrgica Norte',    title: 'Máquinas pesadas',             cargo: 'Maquinário · 3 un',       color: '#8a8fa3', to: 'warehouse', pay: 5600, time: 180, risk: 'medio', level: 3 },
+    { id: 'c7', client: 'PetroSul',             title: 'Combustível especial',         cargo: 'Tambores · 20 un',        color: '#e4572e', to: 'port',      pay: 6800, time: 160, risk: 'alto',  level: 3 },
   ];
 
   const UPGRADES = {
     engine:   { name: 'Motor',   desc: '+8% velocidade máxima e +10% aceleração por nível', costs: [1500, 3500, 7000] },
     brakes:   { name: 'Freios',  desc: '+12% de força de frenagem por nível',               costs: [1000, 2500, 5000] },
     steering: { name: 'Direção', desc: '+10% de resposta do volante e curvas melhores em velocidade', costs: [1200, 3000, 6000] },
-    mobile:   { name: 'Celular Móvel', desc: 'Acesse a loja e contratos de qualquer lugar do mapa', costs: [25000] },
-    flashlight: { name: 'Lanterna', desc: 'Permite explorar o porão escuro atrás do escritório', costs: [500] },
-    fleetManager: { name: 'Funcionário Responsável', desc: 'Permite despachar até 5 caminhões da frota para entregas automáticas', costs: [50000] },
   };
 
   const PAINTS = [
@@ -45,24 +41,23 @@
     { color: '#2b2f36', name: 'Grafite' },
   ];
   const PAINT_COST = 200;
-  const MAX_LEVEL = 20;
+
+  const LEVEL_STEP = 3;
+  const MAX_LEVEL = 5;
   const REPAIR_PER_POINT = 15;
 
   function fresh() {
     return {
-      v: 4,
+      v: 1,
       company: 'Transportes Aurora',
-      money: 1500,
+      money: 500,
       earned: 0,
       spent: 0,
       deliveries: 0,
       condition: 100,
-      upgrades: { engine: 0, brakes: 0, steering: 0, mobile: 0, flashlight: 0, fleetManager: 0 },
+      upgrades: { engine: 0, brakes: 0, steering: 0 },
       paint: '#d64541',
       paintsOwned: ['#d64541'],
-      stock: 5, // Estoque inicial de mercadorias
-      fleetCount: 0, // Número de caminhões na frota (máx 5)
-      storyState: 'none', // 'none' | 'met' | 'refused' | 'accepted' | 'completed'
       mission: null,
       log: [],
       history: [],
@@ -78,7 +73,7 @@
       Object.keys(d).forEach((k) => {
         if (s[k] !== undefined && typeof s[k] === typeof d[k]) d[k] = s[k];
       });
-      d.upgrades = Object.assign({ engine: 0, brakes: 0, steering: 0, mobile: 0, flashlight: 0, fleetManager: 0 }, s.upgrades || {});
+      d.upgrades = Object.assign({ engine: 0, brakes: 0, steering: 0 }, s.upgrades || {});
       if (!Array.isArray(d.log)) d.log = [];
       if (!Array.isArray(d.history)) d.history = [];
       if (!Array.isArray(d.paintsOwned) || !d.paintsOwned.length) d.paintsOwned = [d.paint];
@@ -104,6 +99,7 @@
     PAINTS: PAINTS,
     PAINT_COST: PAINT_COST,
     MAX_LEVEL: MAX_LEVEL,
+    LEVEL_STEP: LEVEL_STEP,
     data: null,
 
     fmt: function (n) {
@@ -130,29 +126,15 @@
       store.touch();
     },
 
-    // Curva de dificuldade progressiva até o nível 20
     level: function () {
-      let lvl = 1;
-      let req = 3;
-      let count = store.data.deliveries;
-      while (lvl < MAX_LEVEL && count >= req) {
-        count -= req;
-        lvl++;
-        req += 2; // Fica mais difícil a cada nível
-      }
-      return Math.min(MAX_LEVEL, lvl);
+      return Math.min(MAX_LEVEL, 1 + Math.floor(store.data.deliveries / LEVEL_STEP));
     },
 
     levelProgress: function () {
       const lvl = store.level();
-      if (lvl >= MAX_LEVEL) return { done: 10, need: 10, pct: 1, max: true };
-      let req = 3;
-      let count = store.data.deliveries;
-      for (let i = 1; i < lvl; i++) {
-        count -= req;
-        req += 2;
-      }
-      return { done: Math.max(0, count), need: req, pct: Math.min(1, Math.max(0, count / req)), max: false };
+      if (lvl >= MAX_LEVEL) return { done: LEVEL_STEP, need: LEVEL_STEP, pct: 1, max: true };
+      const done = store.data.deliveries - (lvl - 1) * LEVEL_STEP;
+      return { done: done, need: LEVEL_STEP, pct: done / LEVEL_STEP, max: false };
     },
 
     contract: contractById,
@@ -177,9 +159,6 @@
       if (!c) return { ok: false, msg: 'Contrato não encontrado.' };
       if (d.mission) return { ok: false, msg: 'Termine ou cancele o contrato atual primeiro.' };
       if (c.level > store.level()) return { ok: false, msg: 'Nível da transportadora insuficiente.' };
-      if (d.stock < 1) return { ok: false, msg: 'Estoque esgotado! Compre mercadorias na Loja antes de aceitar.' };
-      
-      d.stock -= 1; // Consome 1 unidade de estoque
       d.mission = { id: c.id, stage: 'pickup', timeLeft: null, damage: 0 };
       store.touch();
       store.save();
@@ -205,7 +184,7 @@
       d.mission = null;
       store.touch();
       store.save();
-      return { ok: true, msg: 'Contrato cancelado.' };
+      return { ok: true, msg: 'Contrato cancelado. Multa: ' + store.fmt(pen) };
     },
 
     completeMission: function () {
@@ -256,8 +235,8 @@
 
     repair: function () {
       const cost = store.repairCost();
-      if (cost === 0) return { ok: false, msg: 'O caminhão já está perfeito.' };
-      if (!store.spend(cost, 'Reparo')) return { ok: false, msg: 'Saldo insuficiente.' };
+      if (cost === 0) return { ok: false, msg: 'O caminhão já está em perfeito estado.' };
+      if (!store.spend(cost, 'Reparo do caminhão')) return { ok: false, msg: 'Saldo insuficiente para o reparo.' };
       store.data.condition = 100;
       store.touch();
       store.save();
@@ -267,48 +246,26 @@
     upgradeLevel: function (key) { return store.data.upgrades[key] || 0; },
 
     upgradeCost: function (key) {
-      const u = UPGRADES[key];
       const lvl = store.upgradeLevel(key);
-      if (Array.isArray(u.costs)) {
-        return lvl >= u.costs.length ? null : u.costs[lvl];
-      }
-      return lvl > 0 ? null : u.costs;
+      const costs = UPGRADES[key].costs;
+      return lvl >= costs.length ? null : costs[lvl];
     },
 
     buyUpgrade: function (key) {
       const cost = store.upgradeCost(key);
-      if (cost == null) return { ok: false, msg: 'Já adquirido.' };
+      if (cost == null) return { ok: false, msg: 'Nível máximo atingido.' };
       if (!store.spend(cost, 'Upgrade: ' + UPGRADES[key].name)) return { ok: false, msg: 'Saldo insuficiente.' };
       store.data.upgrades[key] = store.upgradeLevel(key) + 1;
       store.touch();
       store.save();
-      return { ok: true, msg: UPGRADES[key].name + ' adquirido!' };
-    },
-
-    buyStock: function (qty, cost) {
-      if (!store.spend(cost, 'Compra de Estoque')) return { ok: false, msg: 'Saldo insuficiente.' };
-      store.data.stock += qty;
-      store.touch();
-      store.save();
-      return { ok: true, msg: 'Estoque reposto com sucesso!' };
-    },
-
-    buyTruck: function () {
-      const d = store.data;
-      if (d.fleetCount >= 5) return { ok: false, msg: 'Limite máximo de 5 caminhões na frota atingido.' };
-      const cost = 20000 + d.fleetCount * 10000;
-      if (!store.spend(cost, 'Contratação de Caminhão da Frota')) return { ok: false, msg: 'Saldo insuficiente.' };
-      d.fleetCount += 1;
-      store.touch();
-      store.save();
-      return { ok: true, msg: 'Novo caminhão adicionado à frota!' };
+      return { ok: true, msg: UPGRADES[key].name + ' melhorado!' };
     },
 
     setPaint: function (color) {
       const d = store.data;
-      if (d.paint === color) return { ok: true, msg: 'Cor atual.' };
+      if (d.paint === color) return { ok: true, msg: 'Essa já é a cor atual.' };
       if (d.paintsOwned.indexOf(color) === -1) {
-        if (!store.spend(PAINT_COST, 'Pintura')) return { ok: false, msg: 'Saldo insuficiente.' };
+        if (!store.spend(PAINT_COST, 'Pintura do caminhão')) return { ok: false, msg: 'Saldo insuficiente.' };
         d.paintsOwned.push(color);
       }
       d.paint = color;
@@ -319,11 +276,11 @@
 
     rename: function (name) {
       const n = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 24);
-      if (n.length < 3) return { ok: false, msg: 'Mínimo 3 caracteres.' };
+      if (n.length < 3) return { ok: false, msg: 'Use pelo menos 3 caracteres.' };
       store.data.company = n;
       store.touch();
       store.save();
-      return { ok: true, msg: 'Nome atualizado.' };
+      return { ok: true, msg: 'Nome da transportadora atualizado.' };
     },
 
     mods: function () {
