@@ -4,13 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#10161c" />
-  <title>TRUCK CITY - Fase 3</title>
-  <!-- ?v=3 evita que o GitHub Pages/navegador sirva arquivos antigos do cache -->
-  <link rel="stylesheet" href="css/style.css?v=3" />
+  <title>TRUCK CITY - Atualização 4.0</title>
+  <link rel="stylesheet" href="css/style.css?v=4" />
 </head>
 <body>
 
-  <!-- Canvas do Phaser entra aqui -->
+  <!-- Canvas do Phaser -->
   <div id="game-container"></div>
 
   <!-- TELA DE CONFIGURAÇÃO INICIAL -->
@@ -42,7 +41,7 @@
 
     <!-- Painel da missão (canto superior direito) -->
     <div id="mission-box" class="hidden">
-      <div class="m-head"><span class="m-tag">MISS&Atilde;O</span><span id="m-time" class="m-time"></span></div>
+      <div class="m-head"><span class="m-tag">MISSÃO</span><span id="m-time" class="m-time"></span></div>
       <div id="m-title"></div>
       <div id="m-step"></div>
       <div id="m-prog" class="hidden">
@@ -68,15 +67,22 @@
     <div id="summary" class="hidden"></div>
   </div>
 
-  <!-- BOTÃO CONTEXTUAL (oculto por padrão; fixo no canto inferior direito) -->
+  <!-- BOTÃO CONTEXTUAL (A pé ou Entrar/Sair) -->
   <button id="btn-action" type="button">
     <span id="action-label"></span><span class="key">E</span>
   </button>
 
+  <!-- BOTÃO DE CELULAR MÓVEL (NOVO! Visível apenas a pé fora do caminhão, canto inferior direito acima do contextual) -->
+  <button id="btn-mobile-phone" class="hidden" type="button" title="Abrir Celular Móvel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">
+      <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+      <line x1="12" y1="18" x2="12.01" y2="18"></line>
+    </svg>
+    <span>Celular</span>
+  </button>
+
   <!-- CONTROLES MOBILE -->
   <div id="controls" class="hidden">
-
-    <!-- Opção A: botões direcionais -->
     <div id="dpad">
       <button class="ctl" data-hold="up">&#9650;</button>
       <button class="ctl" data-hold="left">&#9664;</button>
@@ -84,7 +90,6 @@
       <button class="ctl" data-hold="down">&#9660;</button>
     </div>
 
-    <!-- Opção B: volante (esquerda) + pedais (direita) -->
     <div id="wheel-wrap">
       <div id="wheel">
         <svg viewBox="0 0 100 100" aria-hidden="true">
@@ -99,12 +104,12 @@
     </div>
 
     <div id="pedals">
-      <button class="ctl pedal" id="pedal-brake" data-hold="brake">FREIO<br />/ R&Eacute;</button>
+      <button class="ctl pedal" id="pedal-brake" data-hold="brake">FREIO<br />/ RÉ</button>
       <button class="ctl pedal" id="pedal-gas" data-hold="gas">ACEL.</button>
     </div>
   </div>
 
-  <!-- COMPUTADOR DA TRANSPORTADORA (TruckOS) -->
+  <!-- COMPUTADOR DA TRANSPORTADORA (TruckOS) / LOJA / CELULAR -->
   <div id="pc-ui" class="hidden" role="dialog" aria-label="Computador da transportadora">
     <div id="os">
       <div id="os-top">
@@ -158,10 +163,10 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-  <script src="js/controls.js?v=3"></script>
-  <script src="js/store.js?v=3"></script>
-  <script src="js/art.js?v=3"></script>
-  <script src="js/pc.js?v=3"></script>
-  <script src="js/game.js?v=3"></script>
+  <script src="js/controls.js?v=4"></script>
+  <script src="js/store.js?v=4"></script>
+  <script src="js/art.js?v=4"></script>
+  <script src="js/pc.js?v=4"></script>
+  <script src="js/game.js?v=4"></script>
 </body>
 </html>
