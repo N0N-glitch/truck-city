@@ -1,8 +1,6 @@
 /* ============================================================
-   TRUCK CITY - pc.js  (Fase 3) - TruckOS
-   Sistema do computador da transportadora:
-   área de trabalho, janelas e apps (Contratos, Banco, Garagem, Empresa).
-   Uso: TC.pc.open(callbackAoFechar)
+   TRUCK CITY - pc.js  (Atualização 4.0) - TruckOS
+   Computador da transportadora: Contratos, Loja/Estoque, Banco, Garagem, Frota e Empresa.
    ============================================================ */
 (function () {
   'use strict';
@@ -15,7 +13,6 @@
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 
-  /* ---------- ÍCONES (SVG de traço, 24x24) ---------- */
   const ICON = {
     clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5"/><path d="M9 13l2.2 2.2L15.5 11"/>',
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><circle cx="16.5" cy="14.5" r="1.3"/>',
@@ -41,9 +38,11 @@
 
   const APPS = [
     { id: 'contracts', name: 'Contratos', icon: 'clipboard', tone: 'blue' },
+    { id: 'store',     name: 'Loja & Estoque', icon: 'box', tone: 'orange' },
+    { id: 'fleet',     name: 'Frota',     icon: 'truck',     tone: 'purple' },
     { id: 'bank',      name: 'Banco',     icon: 'wallet',    tone: 'green' },
-    { id: 'garage',    name: 'Garagem',   icon: 'truck',     tone: 'orange' },
-    { id: 'company',   name: 'Empresa',   icon: 'building',  tone: 'purple' },
+    { id: 'garage',    name: 'Garagem',   icon: 'wrench',    tone: 'orange' },
+    { id: 'company',   name: 'Empresa',   icon: 'building',  tone: 'blue' },
   ];
   const appById = (id) => APPS.filter((a) => a.id === id)[0];
 
@@ -66,7 +65,6 @@
 
   const ui = { open: false, app: null, tab: 'available', onClose: null, clock: null, toastTimer: null, confirmReset: false };
 
-  /* ---------- UTILITÁRIOS ---------- */
   function fmtTime(sec) {
     sec = Math.max(0, Math.round(sec));
     const m = Math.floor(sec / 60);
@@ -91,7 +89,6 @@
     el.clock.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
 
-  /* ---------- CASCA (barra superior, ícones, dock, widgets) ---------- */
   function renderChrome() {
     el.company.textContent = S.data.company;
     el.money.textContent = S.fmt(S.data.money);
@@ -132,25 +129,26 @@
     } else {
       missionHtml =
         '<h4>Nenhuma missão ativa</h4>' +
-        '<div class="w-sub">Abra Contratos para aceitar uma entrega.</div>' +
-        '<div class="w-row"><button class="btn sm primary" data-act="open" data-app="contracts">Abrir Contratos</button></div>';
+        '<div class="w-sub">Estoque atual: <b>' + d.stock + ' un</b></div>' +
+        '<div class="w-row"><button class="btn sm primary" data-act="open" data-app="store">Repor Estoque</button></div>';
     }
 
     el.widgets.innerHTML =
-      '<div class="w-card"><div class="w-label">' + ic('wallet') + ' SALDO</div>' +
+      '<div class="w-card"><div class="w-label">' + ic('wallet') + ' SALDO & ESTOQUE</div>' +
         '<div class="w-big">' + S.fmt(d.money) + '</div>' +
-        '<div class="w-sub">' + d.deliveries + ' entregas · ' + S.fmt(d.earned) + ' ganhos</div></div>' +
+        '<div class="w-sub">Estoque disponível: <b>' + d.stock + ' cargas</b></div></div>' +
       '<div class="w-card"><div class="w-label">' + ic('clipboard') + ' MISSÃO ATUAL</div>' + missionHtml + '</div>' +
       '<div class="w-card"><div class="w-label">' + ic('star') + ' NÍVEL DA TRANSPORTADORA</div>' +
-        '<div class="w-big" style="color:#ffd978">Nível ' + lvl + '</div>' +
+        '<div class="w-big" style="color:#ffd978">Nível ' + lvl + ' / ' + S.MAX_LEVEL + '</div>' +
         '<div class="meter"><i style="width:' + Math.round(lp.pct * 100) + '%"></i></div>' +
         '<div class="w-sub" style="margin-top:6px">' + (lp.max ? 'Nível máximo!' : lp.done + '/' + lp.need + ' entregas para o próximo nível') + '</div></div>';
   }
 
   /* ---------- APP: CONTRATOS ---------- */
-  function contractCard(c, lvl, hasMission) {
+  function contractCard(c, lvl, hasMission, stock) {
     const dest = S.DEST[c.to];
     const locked = c.level > lvl;
+    const noStock = stock < 1;
     return (
       '<article class="c-card risk-' + c.risk + (locked ? ' locked' : '') + '">' +
         '<div class="c-top"><span class="tag tag-' + c.risk + '">' + RISK[c.risk] + '</span>' +
@@ -160,12 +158,14 @@
         '<ul class="c-info">' +
           '<li>' + ic('box') + '<span><i style="background:' + c.color + '"></i>' + esc(c.cargo) + '</span></li>' +
           '<li>' + ic('route') + '<span>Zona de Carga → ' + esc(dest.name) + '</span></li>' +
-          '<li>' + ic('clock') + '<span>Prazo: ' + fmtTime(c.time) + ' após carregar</span></li>' +
+          '<li>' + ic('clock') + '<span>Prazo: ' + fmtTime(c.time) + ' · Requer 1 Estoque</span></li>' +
         '</ul>' +
         '<div class="c-foot"><span class="pay">' + S.fmt(c.pay) + '</span>' +
         (locked
           ? '<span class="lock">' + ic('lock') + ' Nível ' + c.level + '</span>'
-          : '<button class="btn primary sm" data-act="accept" data-id="' + c.id + '"' + (hasMission ? ' disabled' : '') + '>Aceitar</button>') +
+          : noStock
+            ? '<span class="lock" style="color:#ff6b6b">Sem estoque</span>'
+            : '<button class="btn primary sm" data-act="accept" data-id="' + c.id + '"' + (hasMission ? ' disabled' : '') + '>Aceitar</button>') +
         '</div>' +
       '</article>'
     );
@@ -177,7 +177,7 @@
     const lvl = S.level();
     let h =
       '<div class="app-head"><div><h2>Central de Contratos</h2>' +
-      '<p class="sub">Aceite um contrato, estacione na Zona de Carga, leve a carga ao destino e receba. Entregas rápidas rendem bônus.</p></div>' +
+      '<p class="sub">Estoque atual: <b>' + d.stock + ' unidades</b>. Aceite contratos e faça entregas.</p></div>' +
       '<span class="lvl-pill">' + ic('star') + ' Nível ' + lvl + '</span></div>';
 
     if (m) {
@@ -189,8 +189,8 @@
           '<div class="row-between"><b style="font-size:16px">Contrato ativo · ' + esc(c.title) + '</b><span class="pay">' + S.fmt(c.pay) + '</span></div>' +
           '<div class="w-sub">' + esc(c.client) + ' · ' + esc(c.cargo) + '</div>' +
           '<div class="steps">' +
-            '<div class="step ' + (picked ? 'done' : 'now') + '"><span class="num">' + (picked ? ic('check') : '1') + '</span><span>Carregar na <b>Zona de Carga</b> (Truck City)</span></div>' +
-            '<div class="step ' + (picked ? 'now' : '') + '"><span class="num">2</span><span>Entregar em <b>' + esc(dest.name) + '</b><br><small style="opacity:.7">' + esc(dest.where) + '</small></span></div>' +
+            '<div class="step ' + (picked ? 'done' : 'now') + '"><span class="num">' + (picked ? ic('check') : '1') + '</span><span>Carregar na <b>Zona de Carga</b></span></div>' +
+            '<div class="step ' + (picked ? 'now' : '') + '"><span class="num">2</span><span>Entregar em <b>' + esc(dest.name) + '</b></span></div>' +
           '</div>' +
           '<button class="btn danger sm" data-act="cancel">Cancelar contrato (multa ' + S.fmt(S.cancelPenalty()) + ')</button>' +
         '</div>';
@@ -203,9 +203,9 @@
       '</div>';
 
     if (ui.tab === 'available') {
-      h += '<div class="c-grid">' + S.CONTRACTS.map((c) => contractCard(c, lvl, !!m)).join('') + '</div>';
+      h += '<div class="c-grid">' + S.CONTRACTS.map((c) => contractCard(c, lvl, !!m, d.stock)).join('') + '</div>';
     } else if (!d.history.length) {
-      h += '<div class="empty">Você ainda não concluiu nenhuma entrega.</div>';
+      h += '<div class="empty">Nenhuma entrega concluída.</div>';
     } else {
       h += '<div class="tx-list">' + d.history.map((x) =>
         '<div class="tx in"><span class="dot">' + ic('check') + '</span><div class="t"><b>' + esc(x.title) + '</b><span>' + fmtDate(x.t) + '</span></div><span class="amt">+ ' + S.fmt(x.total) + '</span></div>'
@@ -214,24 +214,70 @@
     return h;
   }
 
+  /* ---------- APP: LOJA & ESTOQUE ---------- */
+  function renderStore() {
+    const d = S.data;
+    return (
+      '<div class="app-head"><div><h2>Loja & Reposição de Estoque</h2>' +
+      '<p class="sub">Compre mercadorias para o seu estoque e adquira melhorias especiais como o Celular Móvel e a Lanterna.</p></div></div>' +
+      '<div class="panel-card" style="margin-bottom:16px">' +
+        '<h3>Repor Estoque de Cargas</h3>' +
+        '<div class="row-between" style="margin:10px 0"><span>Estoque atual: <b>' + d.stock + ' unidades</b></span></div>' +
+        '<div class="w-row">' +
+          '<button class="btn primary" data-act="buy-stock" data-qty="5" data-cost="800">Comprar 5 Cargas ($ 800)</button>' +
+          '<button class="btn primary" data-act="buy-stock" data-qty="15" data-cost="2200">Comprar 15 Cargas ($ 2.200)</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="panel-card"><h3>Upgrades Especiais</h3>' +
+        '<div class="upg"><span class="tile tone-blue">' + ic('box') + '</span>' +
+          '<div class="info"><b>Celular Móvel</b><span>Permite abrir a Loja e gerenciar contratos de qualquer lugar do mundo.</span></div>' +
+          (d.upgrades.mobile > 0 ? '<span class="lock">' + ic('check') + ' Adquirido</span>' : '<button class="btn primary sm" data-act="special-upg" data-key="mobile">' + S.fmt(S.UPGRADES.mobile.costs[0]) + '</button>') +
+        '</div>' +
+        '<div class="upg"><span class="tile tone-orange">' + ic('wrench') + '</span>' +
+          '<div class="info"><b>Lanterna de Alta Potência</b><span>Necessária para explorar o porão escuro atrás do escritório.</span></div>' +
+          (d.upgrades.flashlight > 0 ? '<span class="lock">' + ic('check') + ' Adquirido</span>' : '<button class="btn primary sm" data-act="special-upg" data-key="flashlight">' + S.fmt(S.UPGRADES.flashlight.costs[0]) + '</button>') +
+        '</div>' +
+        '<div class="upg"><span class="tile tone-purple">' + ic('truck') + '</span>' +
+          '<div class="info"><b>Funcionário Responsável</b><span>Permite despachar caminhões da frota para entregas automáticas.</span></div>' +
+          (d.upgrades.fleetManager > 0 ? '<span class="lock">' + ic('check') + ' Adquirido</span>' : '<button class="btn primary sm" data-act="special-upg" data-key="fleetManager">' + S.fmt(S.UPGRADES.fleetManager.costs[0]) + '</button>') +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  /* ---------- APP: FROTA ---------- */
+  function renderFleet() {
+    const d = S.data;
+    const maxFleet = 5;
+    const nextTruckCost = 20000 + d.fleetCount * 10000;
+    return (
+      '<div class="app-head"><div><h2>Gerenciamento de Frota</h2>' +
+      '<p class="sub">Contrate até 5 caminhões para o seu comboio ou para realizar entregas automáticas.</p></div></div>' +
+      '<div class="panel-card">' +
+        '<h3>Caminhões na Frota: ' + d.fleetCount + ' / ' + maxFleet + '</h3>' +
+        '<div class="w-sub" style="margin:8px 0 16px">Cada caminhão contratado pode seguir você no modo comboio ou trabalhar na transportadora.</div>' +
+        (d.fleetCount < maxFleet
+          ? '<button class="btn primary" data-act="buy-truck">Contratar Novo Caminhão (' + S.fmt(nextTruckCost) + ')</button>'
+          : '<div class="lvl-pill">Frota máxima atingida!</div>') +
+      '</div>'
+    );
+  }
+
   /* ---------- APP: BANCO ---------- */
   function renderBank() {
     const d = S.data;
     const avg = d.deliveries ? Math.round(d.earned / d.deliveries) : 0;
     let h =
-      '<div class="app-head"><div><h2>Banco da Transportadora</h2><p class="sub">Saldo, receitas e despesas da empresa.</p></div></div>' +
+      '<div class="app-head"><div><h2>Banco da Transportadora</h2><p class="sub">Finanças da empresa.</p></div></div>' +
       '<div class="bal-card"><div class="lbl">SALDO DISPONÍVEL</div><div class="val">' + S.fmt(d.money) + '</div><div class="owner">' + esc(d.company) + '</div></div>' +
       '<div class="stat-tiles">' +
-        '<div class="stat-tile"><div class="k">RECEITA TOTAL</div><div class="v" style="color:#7dffb0">' + S.fmt(d.earned) + '</div></div>' +
+        '<div class="stat-tile"><div class="k">RECEITA</div><div class="v" style="color:#7dffb0">' + S.fmt(d.earned) + '</div></div>' +
         '<div class="stat-tile"><div class="k">DESPESAS</div><div class="v" style="color:#ff9c9c">' + S.fmt(d.spent) + '</div></div>' +
         '<div class="stat-tile"><div class="k">ENTREGAS</div><div class="v">' + d.deliveries + '</div></div>' +
-        '<div class="stat-tile"><div class="k">TICKET MÉDIO</div><div class="v">' + S.fmt(avg) + '</div></div>' +
       '</div>' +
       '<div class="panel-card"><h3>Extrato</h3>';
-
-    if (!d.log.length) {
-      h += '<div class="empty">Nenhuma movimentação ainda.</div>';
-    } else {
+    if (!d.log.length) h += '<div class="empty">Nenhuma movimentação.</div>';
+    else {
       h += '<div class="tx-list">' + d.log.slice(0, 20).map((x) => {
         const inn = x.amount >= 0;
         return '<div class="tx ' + (inn ? 'in' : 'out') + '"><span class="dot">' + ic(inn ? 'trend' : 'down') + '</span>' +
@@ -245,10 +291,7 @@
   /* ---------- APP: GARAGEM ---------- */
   function darken(hex, k) {
     const n = parseInt(hex.slice(1), 16);
-    const r = Math.round(((n >> 16) & 255) * k);
-    const g = Math.round(((n >> 8) & 255) * k);
-    const b = Math.round((n & 255) * k);
-    return 'rgb(' + r + ',' + g + ',' + b + ')';
+    return 'rgb(' + Math.round(((n >> 16) & 255) * k) + ',' + Math.round(((n >> 8) & 255) * k) + ',' + Math.round((n & 255) * k) + ')';
   }
 
   function truckSvg(color) {
@@ -259,60 +302,31 @@
         '<rect x="140" y="20" width="66" height="60" rx="9" fill="' + color + '" stroke="' + darken(color, 0.65) + '" stroke-width="2"/>' +
         '<rect x="176" y="27" width="15" height="46" rx="3" fill="#1b2a3a"/>' +
         '<rect x="200" y="26" width="5" height="12" rx="2" fill="#fff3a0"/><rect x="200" y="62" width="5" height="12" rx="2" fill="#fff3a0"/>' +
-        '<rect x="160" y="14" width="30" height="9" rx="3" fill="#111"/><rect x="160" y="77" width="30" height="9" rx="3" fill="#111"/>' +
       '</svg>'
     );
   }
 
   function renderGarage() {
     const d = S.data;
-    const mods = S.mods();
     const cond = Math.round(d.condition);
-    const condCls = cond >= 60 ? 'ok' : cond >= 30 ? 'mid' : 'low';
     const repairCost = S.repairCost();
 
-    const stats = [
-      ['Velocidade máxima', Math.round(70 * mods.maxFwd) + ' km/h', Math.min(1, mods.maxFwd / 1.3)],
-      ['Aceleração', '+' + Math.round((mods.accel - 1) * 100) + '%', Math.min(1, mods.accel / 1.3)],
-      ['Frenagem', '+' + Math.round((mods.brake - 1) * 100) + '%', Math.min(1, mods.brake / 1.4)],
-      ['Direção', '+' + Math.round((mods.steerRate - 1) * 100) + '%', Math.min(1, mods.steerRate / 1.4)],
-    ];
-
-    const left =
-      '<div class="panel-card"><h3>' + esc(d.company) + ' · Caminhão-baú</h3>' + truckSvg(d.paint) +
+    let left =
+      '<div class="panel-card"><h3>' + esc(d.company) + '</h3>' + truckSvg(d.paint) +
       '<div class="row-between"><span>Condição</span><b>' + cond + '%</b></div>' +
-      '<div class="meter cond"><i class="' + condCls + '" style="width:' + cond + '%"></i></div>' +
-      (mods.perf < 1 ? '<p class="w-sub" style="color:#ffb84d;margin:8px 0 0">Motor danificado: desempenho reduzido em 20%. Faça o reparo!</p>' : '') +
       '<div class="w-row"><button class="btn success" data-act="repair"' + (repairCost === 0 ? ' disabled' : '') + '>' + ic('wrench') + ' ' +
-      (repairCost === 0 ? 'Em perfeito estado' : 'Reparar · ' + S.fmt(repairCost)) + '</button></div>' +
-      '<div style="margin-top:16px">' +
-      stats.map((s) =>
-        '<div class="stat-line"><div class="row-between"><span>' + s[0] + '</span><b>' + s[1] + '</b></div><div class="meter"><i style="width:' + Math.round(s[2] * 100) + '%"></i></div></div>'
-      ).join('') + '</div></div>';
+      (repairCost === 0 ? 'Perfeito' : 'Reparar · ' + S.fmt(repairCost)) + '</button></div></div>';
 
-    const upgIcons = { engine: ['engine', 'orange'], brakes: ['brake', 'red'], steering: ['wheel', 'blue'] };
-    let right = '<div class="panel-card"><h3>Upgrades</h3>' + Object.keys(S.UPGRADES).map((key) => {
+    let right = '<div class="panel-card"><h3>Upgrades do Veículo</h3>' + ['engine', 'brakes', 'steering'].map((key) => {
       const u = S.UPGRADES[key];
       const lvl = S.upgradeLevel(key);
       const cost = S.upgradeCost(key);
-      const pips = [0, 1, 2].map((i) => '<i class="' + (i < lvl ? 'on' : '') + '"></i>').join('');
-      return '<div class="upg"><span class="tile tone-' + upgIcons[key][1] + '">' + ic(upgIcons[key][0]) + '</span>' +
-        '<div class="info"><b>' + u.name + ' · nível ' + lvl + '/3</b><span>' + u.desc + '</span><div class="pips">' + pips + '</div></div>' +
-        (cost == null
-          ? '<span class="lock">' + ic('check') + ' Máx.</span>'
-          : '<button class="btn primary sm" data-act="upgrade" data-key="' + key + '"' + (d.money < cost ? ' disabled' : '') + '>' + S.fmt(cost) + '</button>') +
+      return '<div class="upg"><b>' + u.name + ' · nível ' + lvl + '/3</b>' +
+        (cost == null ? '<span>Máx</span>' : '<button class="btn primary sm" data-act="upgrade" data-key="' + key + '"' + (d.money < cost ? ' disabled' : '') + '>' + S.fmt(cost) + '</button>') +
         '</div>';
     }).join('') + '</div>';
 
-    right += '<div class="panel-card" style="margin-top:16px"><h3>' + ic('paint') + ' Pintura da cabine</h3><div class="swatches" style="padding-bottom:18px">' +
-      S.PAINTS.map((p) => {
-        const owned = d.paintsOwned.indexOf(p.color) !== -1;
-        return '<button class="swatch' + (d.paint === p.color ? ' sel' : '') + '" style="background:' + p.color + '" data-act="paint" data-color="' + p.color + '" title="' + p.name + '">' +
-          '<span class="price">' + (d.paint === p.color ? 'atual' : owned ? 'sua' : S.fmt(S.PAINT_COST)) + '</span></button>';
-      }).join('') + '</div></div>';
-
-    return '<div class="app-head"><div><h2>Garagem</h2><p class="sub">Mantenha o caminhão em dia e invista em melhorias de desempenho.</p></div></div>' +
-      '<div class="garage-grid"><div>' + left + '</div><div>' + right + '</div></div>';
+    return '<div class="app-head"><div><h2>Garagem</h2></div></div><div class="garage-grid"><div>' + left + '</div><div>' + right + '</div></div>';
   }
 
   /* ---------- APP: EMPRESA ---------- */
@@ -321,38 +335,24 @@
     const lvl = S.level();
     const lp = S.levelProgress();
     return (
-      '<div class="app-head"><div><h2>Minha Transportadora</h2><p class="sub">Perfil da empresa, reputação e opções.</p></div>' +
-      '<span class="lvl-pill">' + ic('star') + ' Nível ' + lvl + '</span></div>' +
+      '<div class="app-head"><div><h2>Minha Transportadora</h2><p class="sub">Nível ' + lvl + ' de ' + S.MAX_LEVEL + '</p></div></div>' +
       '<div class="co-grid">' +
         '<div class="panel-card"><h3>Identidade</h3>' +
-          '<div class="w-sub">Nome da transportadora</div>' +
-          '<div class="field"><input id="co-name" type="text" maxlength="24" value="' + esc(d.company) + '" autocomplete="off" />' +
+          '<div class="field"><input id="co-name" type="text" maxlength="24" value="' + esc(d.company) + '" />' +
           '<button class="btn primary" data-act="rename">Salvar</button></div>' +
-          '<div class="lvl-bar"><div class="row-between"><span>Reputação</span><b>' + (lp.max ? 'Máximo' : lp.done + '/' + lp.need) + '</b></div>' +
+          '<div class="lvl-bar"><div class="row-between"><span>Progresso de Nível</span><b>' + lp.done + '/' + lp.need + '</b></div>' +
           '<div class="meter"><i style="width:' + Math.round(lp.pct * 100) + '%"></i></div></div>' +
-          '<p class="w-sub">A cada ' + S.LEVEL_STEP + ' entregas você sobe de nível e libera contratos melhores.</p></div>' +
-        '<div class="panel-card"><h3>Estatísticas</h3><div class="kv">' +
-          '<div><span>Entregas concluídas</span><b>' + d.deliveries + '</b></div>' +
-          '<div><span>Receita total</span><b>' + S.fmt(d.earned) + '</b></div>' +
-          '<div><span>Despesas</span><b>' + S.fmt(d.spent) + '</b></div>' +
-          '<div><span>Saldo atual</span><b>' + S.fmt(d.money) + '</b></div>' +
-          '<div><span>Condição do caminhão</span><b>' + Math.round(d.condition) + '%</b></div>' +
-        '</div></div>' +
-        '<div class="panel-card danger-zone" style="grid-column:1/-1"><h3>Opções</h3>' +
-          '<p class="w-sub" style="margin:0 0 10px">Reiniciar apaga saldo, upgrades, pintura, histórico e o contrato ativo. Esta ação não pode ser desfeita.</p>' +
-          (ui.confirmReset
-            ? '<div class="w-row" style="margin-top:0"><button class="btn danger" data-act="reset-yes">Confirmar: apagar tudo</button><button class="btn" data-act="reset-no">Cancelar</button></div>'
-            : '<button class="btn danger" data-act="reset">Reiniciar progresso</button>') +
         '</div>' +
       '</div>'
     );
   }
 
-  /* ---------- JANELA ---------- */
   function renderApp() {
     if (!ui.app) return;
     let html = '';
     if (ui.app === 'contracts') html = renderContracts();
+    else if (ui.app === 'store') html = renderStore();
+    else if (ui.app === 'fleet') html = renderFleet();
     else if (ui.app === 'bank') html = renderBank();
     else if (ui.app === 'garage') html = renderGarage();
     else if (ui.app === 'company') html = renderCompany();
@@ -380,7 +380,6 @@
     renderWidgets();
   }
 
-  /* ---------- EVENTOS ---------- */
   el.root.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
     if (!b || b.disabled) return;
@@ -411,54 +410,36 @@
         toast(r.msg, r.ok ? 'ok' : 'err');
         renderApp();
         break;
-      case 'paint':
-        r = S.setPaint(b.dataset.color);
+      case 'buy-stock':
+        r = S.buyStock(parseInt(b.dataset.qty, 10), parseInt(b.dataset.cost, 10));
         toast(r.msg, r.ok ? 'ok' : 'err');
         renderApp();
         break;
-      case 'rename': {
-        const input = $('#co-name');
-        r = S.rename(input ? input.value : '');
+      case 'buy-truck':
+        r = S.buyTruck();
         toast(r.msg, r.ok ? 'ok' : 'err');
         renderApp();
         break;
-      }
-      case 'reset': ui.confirmReset = true; renderApp(); break;
-      case 'reset-no': ui.confirmReset = false; renderApp(); break;
-      case 'reset-yes':
-        ui.confirmReset = false;
-        S.reset();
-        toast('Progresso reiniciado.', 'ok');
+      case 'special-upg':
+        r = S.buyUpgrade(b.dataset.key);
+        toast(r.msg, r.ok ? 'ok' : 'err');
+        renderApp();
+        break;
+      case 'rename':
+        r = S.rename($('#co-name') ? $('#co-name').value : '');
+        toast(r.msg, r.ok ? 'ok' : 'err');
         renderApp();
         break;
       default: break;
     }
   });
 
-  // Enter no campo de nome salva
-  el.root.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target && e.target.id === 'co-name') {
-      const r = S.rename(e.target.value);
-      toast(r.msg, r.ok ? 'ok' : 'err');
-      renderApp();
-    }
-  });
-
-  // Esc: fecha a janela; sem janela, desliga o computador
-  document.addEventListener('keydown', (e) => {
-    if (!ui.open || e.key !== 'Escape') return;
-    if (ui.app) closeApp();
-    else close();
-  });
-
-  // Atualiza barra superior e widgets quando o estado muda (apenas se aberto)
   S.subscribe(() => {
     if (!ui.open) return;
     renderChrome();
     renderWidgets();
   });
 
-  /* ---------- ABRIR / FECHAR ---------- */
   function open(onClose) {
     ui.open = true;
     ui.onClose = onClose || null;
