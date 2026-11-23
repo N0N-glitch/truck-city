@@ -1,5 +1,5 @@
 /* ============================================================
-   TRUCK CITY - game.js  (Atualização Passo 1: Mapa em Cruz e Tráfego BR)
+   TRUCK CITY - game.js  (Fase 3 Original Estável)
    ============================================================ */
 (function () {
   'use strict';
@@ -41,32 +41,18 @@
   const DWELL_TIME = 2;
   const ZONE_TOL = 10;
 
-  // Mapa expandido com estradas em cruz (Cima, Esquerda, Direita e Sul)
   const SEGMENTS = {
     city:     { id: 'city',     name: 'TRUCK CITY',          sub: 'Centro da cidade',                      ox: 0,    oy: 0, w: CFG.city.w,     h: CFG.city.h,     padX: 0,   padY: 0 },
-    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia · Tráfego de veículos',         ox: 4000, oy: -4000, w: CFG.br.w,     h: CFG.br.h + 8000, padX: 800, padY: 800 },
-    west:     { id: 'west',     name: 'RODOVIA OESTE',       sub: 'Rota Comercial Oeste',                  ox: -4000, oy: 0, w: CFG.city.w,    h: CFG.city.h,     padX: 600, padY: 0 },
-    east:     { id: 'east',     name: 'RODOVIA LESTE',       sub: 'Zona Industrial Leste',                 ox: 4000, oy: 0, w: CFG.city.w,    h: CFG.city.h,     padX: 600, padY: 0 },
-    district: { id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística e Norte',                ox: 4000, oy: -8000, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400 },
+    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia · sentido Distrito Industrial', ox: 4000, oy: 0, w: CFG.br.w,       h: CFG.br.h,       padX: 800, padY: 0 },
+    district: { id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística',                        ox: 8000, oy: 0, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400 },
   };
 
-  // Portais ajustados para o formato de cruz
   const PORTALS = [
-    // Saída Norte da Cidade para a BR-116
-    { seg: 'city',     edge: 'N', min: 900,  max: 1100, to: 'br',       arrive: { x: 504,  y: 7800, axis: 'x' }, spread: 50 },
-    // Saída Sul da Cidade para a BR-116
-    { seg: 'city',     edge: 'S', min: 900,  max: 1100, to: 'br',       arrive: { x: 504,  y: 200,  axis: 'x' }, spread: 50 },
-    // Saída Oeste para Rodovia Oeste
-    { seg: 'city',     edge: 'W', min: 900,  max: 1100, to: 'west',     arrive: { x: 1800, y: 1000, axis: 'y' }, spread: 50 },
-    // Saída Leste para Rodovia Leste
-    { seg: 'city',     edge: 'E', min: 900,  max: 1100, to: 'east',     arrive: { x: 200,  y: 1000, axis: 'y' }, spread: 50 },
-    
-    // Conexões da BR-116
-    { seg: 'br',       edge: 'S', min: 344,  max: 856,  to: 'city',     arrive: { x: 1050, y: 1830, axis: 'x' }, spread: 40 },
-    { seg: 'br',       edge: 'N', min: 344,  max: 856,  to: 'district', arrive: { x: 750,  y: 7800, axis: 'x' }, spread: 40 },
-    { seg: 'west',     edge: 'E', min: 900,  max: 1100, to: 'city',     arrive: { x: 170,  y: 1000, axis: 'y' }, spread: 50 },
-    { seg: 'east',     edge: 'W', min: 900,  max: 1100, to: 'city',     arrive: { x: 1830, y: 1000, axis: 'y' }, spread: 50 },
-    { seg: 'district', edge: 'S', min: 700,  max: 900,  to: 'br',       arrive: { x: 696,  y: 400,  axis: 'x' }, spread: 50 },
+    { seg: 'city',     edge: 'S', min: 900,  max: 1100, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
+    { seg: 'city',     edge: 'S', min: 1600, max: 1760, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
+    { seg: 'br',       edge: 'N', min: 344,  max: 856,  to: 'city',     arrive: { x: 1050, y: 1830, axis: 'x' }, spread: 40 },
+    { seg: 'br',       edge: 'S', min: 344,  max: 856,  to: 'district', arrive: { x: 750,  y: 170,  axis: 'x' }, spread: 40 },
+    { seg: 'district', edge: 'N', min: 700,  max: 900,  to: 'br',       arrive: { x: 696,  y: 4630, axis: 'x' }, spread: 50 },
   ];
 
   const ZONES = {
@@ -91,6 +77,10 @@
     [120, 120], [310, 80], [520, 150], [730, 100], [210, 205],
     [110, 570], [300, 620], [520, 560], [720, 640], [640, 790], [90, 790],
     [1210, 100], [1370, 70], [1500, 160], [1290, 200], [1190, 220],
+    [1200, 1400], [1420, 1480], [1280, 1650], [1500, 1780], [1180, 1880], [1380, 1900],
+    [150, 1280], [400, 1400], [700, 1320], [260, 1650], [520, 1850], [800, 1600], [100, 1900], [460, 1940],
+    [1880, 180], [1920, 640], [1860, 1000], [1900, 1300], [1850, 1700], [1930, 1900],
+    [1170, 835], [1530, 835],
   ];
 
   const clamp = Phaser.Math.Clamp;
@@ -162,7 +152,7 @@
       this.interaction = null;
       this.zoneInside = {};
       this.zoneGfx = {};
-      this.solids = { city: [], br: [], west: [], east: [], district: [] };
+      this.solids = { city: [], br: [], district: [] };
       this.inSolids = [];
       this.portalCooldown = 0;
       this.noticeCooldown = 0;
@@ -172,9 +162,6 @@
       this.cargoKey = null;
       this.beaconKey = undefined;
 
-      // Lista de carros NPCs na BR
-      this.npcCars = [];
-
       this.buildTextures();
       this.buildCity();
       this.buildBR();
@@ -183,7 +170,6 @@
       this.createTruck();
       this.createPlayer();
       this.createBeacon();
-      this.createNpcTraffic();
       this.createInput();
       this.refreshTruckLook();
 
@@ -250,13 +236,36 @@
       list.push({ x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, r: Math.hypot(w, h) / 2 });
     }
 
+    addSign(x, y, text, bg) {
+      return this.add
+        .text(x, y, text, {
+          fontFamily: 'monospace', fontSize: '15px', fontStyle: 'bold', color: '#ffffff',
+          backgroundColor: bg || '#0b6b3a', padding: { x: 8, y: 5 },
+        })
+        .setOrigin(0.5)
+        .setDepth(6);
+    }
+
     buildCity() {
       const sol = this.solids.city;
       this.add.image(0, 0, 'tex-ground').setOrigin(0).setDepth(0);
+
       this.makeZone('cargo');
       this.makeZone('work');
 
       this.add.image(OFFICE.x - 10, OFFICE.y - 20, 'tex-office').setOrigin(0).setDepth(4);
+      this.add
+        .text(OFFICE.x + OFFICE.w / 2, OFFICE.y + 80, 'TRUCK CITY', {
+          fontFamily: 'monospace', fontSize: '30px', fontStyle: 'bold',
+          color: '#e6eef9', stroke: '#2c3a4d', strokeThickness: 4,
+        })
+        .setOrigin(0.5).setDepth(5).setAlpha(0.92);
+      this.add
+        .text(OFFICE.x + OFFICE.w / 2, OFFICE.y + 112, 'LOGÍSTICA & OBRAS', {
+          fontFamily: 'monospace', fontSize: '13px', color: '#c9d6e8',
+        })
+        .setOrigin(0.5).setDepth(5).setAlpha(0.9);
+
       this.addSolid(sol, OFFICE.x, OFFICE.y, OFFICE.w, OFFICE.h);
       CFG.hedges.forEach((h) => this.addSolid(sol, h.x, h.y, h.w, h.h));
 
@@ -264,15 +273,26 @@
         this.add.image(p[0], p[1], 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
         this.addSolid(sol, p[0] - 17, p[1] - 17, 34, 34);
       });
+
+      this.addSign(700, 1760, '▼ BR-116 · DISTRITO INDUSTRIAL');
+      this.addSign(1540, 1760, '▼ BR-116');
     }
 
     makeZone(key) {
       const z = ZONES[key];
       this.zoneGfx[key] = this.add.graphics().setDepth(2);
       this.drawZone(key, false);
-      this.add.text(z.x + z.w / 2, z.y + z.h / 2, z.label, {
-        fontFamily: 'monospace', fontSize: '22px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 4,
-      }).setOrigin(0.5).setDepth(3);
+      this.add
+        .text(z.x + z.w / 2, z.y + z.h / 2, z.label, {
+          fontFamily: 'monospace',
+          fontSize: '22px',
+          fontStyle: 'bold',
+          color: '#ffffff',
+          stroke: '#000000',
+          strokeThickness: 4,
+        })
+        .setOrigin(0.5)
+        .setDepth(3);
     }
 
     drawZone(key, active) {
@@ -288,20 +308,43 @@
     buildBR() {
       const S = SEGMENTS.br;
       const B = CFG.br;
+      const sol = this.solids.br;
       const ox = S.ox;
       const oy = S.oy;
-      this.add.tileSprite(ox - S.padX, oy - S.padY, S.w + 2 * S.padX, S.h + 2 * S.padY, 'tex-grass').setOrigin(0).setDepth(0);
+      const rnd = ART.mulberry32(99);
+
+      this.add.tileSprite(ox - S.padX, oy, S.w + 2 * S.padX, S.h, 'tex-grass').setOrigin(0).setDepth(0);
       this.add.tileSprite(ox + B.roadX, oy, B.roadW, S.h, 'tex-hwy').setOrigin(0).setDepth(1);
+
+      const railL = ox + B.roadX - 24;
+      const railR = ox + B.roadX + B.roadW + 8;
+      this.add.tileSprite(railL, oy, 16, S.h, 'tex-rail').setOrigin(0).setDepth(3);
+      this.add.tileSprite(railR, oy, 16, S.h, 'tex-rail').setOrigin(0).setDepth(3);
+      this.addSolid(sol, railL - 16, oy, 32, S.h);
+      this.addSolid(sol, railR, oy, 32, S.h);
+
+      for (let y = 60; y < S.h; y += 90 + rnd() * 60) {
+        this.add.image(ox + 20 + rnd() * 240, oy + y, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+        this.add.image(ox + 930 + rnd() * 230, oy + y + rnd() * 40, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+      }
     }
 
     buildDistrict() {
       const S = SEGMENTS.district;
       const ox = S.ox;
       const oy = S.oy;
+      const sol = this.solids.district;
+
       this.add.tileSprite(ox - S.padX, oy - S.padY, S.w + 2 * S.padX, S.h + 2 * S.padY, 'tex-grass').setOrigin(0).setDepth(0);
       this.add.tileSprite(ox, oy, S.w, S.h, 'tex-concrete').setOrigin(0).setDepth(0.2);
+      this.add.tileSprite(ox + 700, oy, 200, 520, 'tex-asphalt').setOrigin(0).setDepth(1);
+      this.add.tileSprite(ox + 80, oy + 500, 1440, 220, 'tex-asphalt').setOrigin(0).setDepth(1);
+
       this.makeZone('warehouse');
       this.makeZone('port');
+
+      this.add.image(ox + 130, oy + 930, 'tex-warehouse').setOrigin(0).setDepth(4);
+      this.addSolid(sol, ox + 130, oy + 930, 432, 272);
     }
 
     buildIndoor() {
@@ -309,35 +352,51 @@
       const S = (x, y, w, h) => this.addSolid(this.inSolids, ROOM.x + x, ROOM.y + y, w, h);
       S(40, 100, 190, 56);
       S(250, 100, 44, 50);
+      S(298, 100, 44, 50);
+      S(370, 104, 28, 36);
       S(460, 100, 220, 100);
+      S(90, 330, 200, 110);
+      S(540, 420, 170, 70);
     }
 
     createTruck() {
       const T = TRUCK;
       const h = T.spawn.heading;
+
       this.truck = {
-        heading: h, speed: 0, steer: 0, reverseLock: false, portalHit: null,
+        heading: h,
+        speed: 0,
+        steer: 0,
+        reverseLock: false,
+        portalHit: null,
         rx: T.spawn.x - Math.cos(h) * T.rearToCenter,
         ry: T.spawn.y - Math.sin(h) * T.rearToCenter,
-        cx: T.spawn.x, cy: T.spawn.y,
+        cx: T.spawn.x,
+        cy: T.spawn.y,
       };
 
       const c = this.add.container(T.spawn.x, T.spawn.y).setDepth(10);
       const shadow = this.add.rectangle(3, 5, 140, 54, 0x000000, 0.25);
       const g = this.add.graphics();
+
       g.fillStyle(0xc4cad1, 1);
       g.fillRect(-70, -27, 92, 54);
       g.lineStyle(2, 0x6b7480, 1);
       g.strokeRect(-70, -27, 92, 54);
 
+      g.fillStyle(0x0b0b0b, 1);
+      g.fillRect(-56, -31, 22, 8);
+      g.fillRect(-56, 23, 22, 8);
+
       this.cargoG = this.add.graphics();
       this.cabG = this.add.graphics();
+
       this.tailL = this.add.rectangle(-69, -19, 3, 10, 0x6b0000);
       this.tailR = this.add.rectangle(-69, 19, 3, 10, 0x6b0000);
 
       const fx = T.wheelbase / 2;
-      this.wheelFL = this.add.rectangle(fx, -27, 22, 8, 0x0b0b0b);
-      this.wheelFR = this.add.rectangle(fx, 27, 22, 8, 0x0b0b0b);
+      this.wheelFL = this.add.rectangle(fx, -27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
+      this.wheelFR = this.add.rectangle(fx, 27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
 
       c.add([shadow, g, this.cargoG, this.cabG, this.tailL, this.tailR, this.wheelFL, this.wheelFR]);
       this.truckView = c;
@@ -347,8 +406,11 @@
       const g = this.cabG;
       g.clear();
       const base = Phaser.Display.Color.HexStringToColor(hexStr).color;
+      const dark = Phaser.Display.Color.HexStringToColor(hexStr).darken(32).color;
       g.fillStyle(base, 1);
       g.fillRect(24, -25, 46, 50);
+      g.lineStyle(2, dark, 1);
+      g.strokeRect(24, -25, 46, 50);
       g.fillStyle(0x1b2a3a, 1);
       g.fillRect(52, -20, 12, 40);
     }
@@ -357,13 +419,34 @@
       const g = this.cargoG;
       g.clear();
       if (!contractId) return;
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(-64, -22, 26, 21);
+      const c = STORE.contract(contractId);
+      if (!c) return;
+      const fill = Phaser.Display.Color.HexStringToColor(c.color).color;
+      const edge = Phaser.Display.Color.HexStringToColor(c.color).darken(32).color;
+      for (let r = 0; r < 2; r++) {
+        for (let k = 0; k < 3; k++) {
+          const x = -64 + k * 28;
+          const y = -22 + r * 23;
+          g.fillStyle(fill, 1);
+          g.fillRect(x, y, 26, 21);
+          g.lineStyle(2, edge, 1);
+          g.strokeRect(x, y, 26, 21);
+        }
+      }
     }
 
     refreshTruckLook() {
       const col = STORE.data.paint;
-      if (this.paintKey !== col) { this.paintKey = col; this.drawCab(col); }
+      if (this.paintKey !== col) {
+        this.paintKey = col;
+        this.drawCab(col);
+      }
+      const m = STORE.data.mission;
+      const key = m && m.stage === 'transit' ? m.id : '';
+      if (this.cargoKey !== key) {
+        this.cargoKey = key;
+        this.drawCargo(key);
+      }
     }
 
     createPlayer() {
@@ -371,11 +454,20 @@
       const body = this.add.circle(0, 0, PLAYER.radius, 0x2d7ff9).setStrokeStyle(2, 0xffffff);
       const nose = this.add.rectangle(9, 0, 8, 4, 0xffffff);
       this.p = this.add.container(0, 0, [shadow, body, nose]).setDepth(20).setVisible(false);
-      this.marker = this.add.circle(0, 0, 10, 0xffffff, 0.15).setStrokeStyle(2, 0xffffff).setDepth(5).setVisible(false);
+
+      this.marker = this.add
+        .circle(0, 0, 10, 0xffffff, 0.15)
+        .setStrokeStyle(2, 0xffffff)
+        .setDepth(5)
+        .setVisible(false);
     }
 
     createBeacon() {
-      this.beacon = this.add.rectangle(0, 0, 100, 100, 0xffffff, 0).setStrokeStyle(6, 0xffffff, 1).setDepth(6).setVisible(false);
+      this.beacon = this.add
+        .rectangle(0, 0, 100, 100, 0xffffff, 0)
+        .setStrokeStyle(6, 0xffffff, 1)
+        .setDepth(6)
+        .setVisible(false);
       this.tweens.add({ targets: this.beacon, alpha: 0.25, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
 
@@ -383,23 +475,12 @@
       const k = zoneKey && ZONES[zoneKey].seg === this.seg.id && !this.indoor ? zoneKey : null;
       if (this.beaconKey === k) return;
       this.beaconKey = k;
-      if (!k) { this.beacon.setVisible(false); return; }
+      if (!k) {
+        this.beacon.setVisible(false);
+        return;
+      }
       const z = ZONES[k];
       this.beacon.setPosition(z.x + z.w / 2, z.y + z.h / 2).setSize(z.w + 16, z.h + 16).setVisible(true);
-    }
-
-    // Criação dos carros NPC na rodovia BR
-    createNpcTraffic() {
-      for (let i = 0; i < 6; i++) {
-        const carGfx = this.add.rectangle(0, 0, 48, 22, 0xd9534f).setDepth(8);
-        this.npcCars.push({
-          sprite: carGfx,
-          x: SEGMENTS.br.ox + 460,
-          y: SEGMENTS.br.oy + Math.random() * SEGMENTS.br.h,
-          speed: 180 + Math.random() * 100,
-          dir: Math.random() > 0.5 ? 1 : -1
-        });
-      }
     }
 
     createInput() {
@@ -409,7 +490,9 @@
         up: K.UP, left: K.LEFT, down: K.DOWN, right: K.RIGHT,
         e: K.E, space: K.SPACE,
       });
+
       if (this.input.mouse) this.input.mouse.disableContextMenu();
+
       this.input.on('pointerdown', (pointer) => {
         if (this.state !== 'foot' || this.busy || this.uiOpen || this.teleporting) return;
         this.setTarget(pointer.worldX, pointer.worldY);
@@ -418,7 +501,9 @@
 
     walkArea() {
       const R = PLAYER.radius;
-      if (this.indoor) return { x0: ROOM_WALK.x0 + R, y0: ROOM_WALK.y0 + R, x1: ROOM_WALK.x1 - R, y1: ROOM_WALK.y1 - R };
+      if (this.indoor) {
+        return { x0: ROOM_WALK.x0 + R, y0: ROOM_WALK.y0 + R, x1: ROOM_WALK.x1 - R, y1: ROOM_WALK.y1 - R };
+      }
       const s = this.seg;
       return { x0: s.ox + R, y0: s.oy + R, x1: s.ox + s.w - R, y1: s.oy + s.h - R };
     }
@@ -461,14 +546,21 @@
       TC.ui.update(dt);
 
       if (this.portalCooldown > 0) this.portalCooldown -= dt;
+      if (this.noticeCooldown > 0) this.noticeCooldown -= dt;
       if (this.hitCooldown > 0) this.hitCooldown -= dt;
 
       const frozen = this.uiOpen || this.busy || this.teleporting;
       let inp = this.readInput();
-      if (frozen) inp = { left: 0, right: 0, up: 0, down: 0, throttle: 0, brake: 0, steer: 0, action: false };
+      if (frozen) {
+        inp = { left: 0, right: 0, up: 0, down: 0, throttle: 0, brake: 0, steer: 0, action: false };
+      }
 
       this.interaction = frozen ? null : this.computeInteraction();
-      if (this.teleporting) { this.positionAction(); return; }
+
+      if (this.teleporting) {
+        this.positionAction();
+        return;
+      }
 
       if (this.state === 'driving') {
         this.updateTruck(dt, inp, false);
@@ -478,11 +570,8 @@
       }
 
       if (inp.action) this.handleAction();
-      if (!frozen && !this.indoor) {
-        this.updateMission(dt);
-        this.updateNpcTraffic(dt);
-      }
 
+      if (!frozen && !this.indoor) this.updateMission(dt);
       this.checkPortal();
       this.refreshTruckLook();
       this.syncVisuals();
@@ -503,15 +592,25 @@
       const brk = inp.brake > 0;
       if (!brk) t.reverseLock = false;
 
-      if (parked) v = approach(v, 0, brakeF * 0.8 * dt);
-      else if (gas && !brk) {
+      if (parked) {
+        v = approach(v, 0, brakeF * 0.8 * dt);
+      } else if (gas && !brk) {
         if (v < 0) v = Math.min(0, v + brakeF * dt);
         else v += accel * (1 - 0.6 * (v / maxFwd)) * dt;
       } else if (brk && !gas) {
-        if (v > 1) { v = Math.max(0, v - brakeF * dt); t.reverseLock = true; }
-        else if (!t.reverseLock) v -= T.revAccel * dt;
-        else v = approach(v, 0, brakeF * dt);
-      } else v = approach(v, 0, (T.roll + Math.abs(v) * T.drag) * dt);
+        if (v > 1) {
+          v = Math.max(0, v - brakeF * dt);
+          t.reverseLock = true;
+        } else if (!t.reverseLock) {
+          v -= T.revAccel * dt;
+        } else {
+          v = approach(v, 0, brakeF * dt);
+        }
+      } else if (gas && brk) {
+        v = approach(v, 0, brakeF * dt);
+      } else {
+        v = approach(v, 0, (T.roll + Math.abs(v) * T.drag) * dt);
+      }
 
       v = clamp(v, -T.maxRev, maxFwd);
 
@@ -522,19 +621,24 @@
       t.steer = approach(t.steer, targetSteer, rate);
 
       const prev = { rx: t.rx, ry: t.ry, heading: t.heading };
+
       t.heading += (v / T.wheelbase) * Math.tan(t.steer) * dt;
+
       t.rx += Math.cos(t.heading) * v * dt;
       t.ry += Math.sin(t.heading) * v * dt;
 
       let cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
       let cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
 
-      if (COLLISIONS.truck && Math.abs(v) > 0.01 && this.truckHitsSolid(cx, cy)) {
-        t.rx = prev.rx; t.ry = prev.ry; t.heading = prev.heading;
+      if (COLLISIONS.truck && Math.abs(v) > 0.01 && this.truckHitsSolid(cx, cy, t.heading)) {
+        t.rx = prev.rx;
+        t.ry = prev.ry;
+        t.heading = prev.heading;
         cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
         cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
+        const sp = Math.abs(v);
         v = -v * 0.2;
-        this.applyDamage(10);
+        if (sp > 20) this.applyDamage((sp / maxFwd) * 12);
       }
 
       const seg = this.seg;
@@ -545,21 +649,52 @@
         const ccx = clamp(cx, seg.ox + MG, seg.ox + seg.w - MG);
         const ccy = clamp(cy, seg.oy + MG, seg.oy + seg.h - MG);
         if (ccx !== cx || ccy !== cy) {
+          if (this.state === 'driving' && Math.abs(v) > 60 && this.noticeCooldown <= 0) {
+            this.noticeCooldown = 3;
+            if (seg.id === 'city') TC.ui.flash('Fim da via. A saída para a BR-116 fica ao sul.', 2600);
+            else if (seg.id === 'district') TC.ui.flash('Fim do pátio. A saída para a BR-116 fica ao norte.', 2600);
+            else TC.ui.flash('Fim da pista.', 1800);
+          }
           v *= 0.6;
-          t.rx += ccx - cx; t.ry += ccy - cy;
-          cx = ccx; cy = ccy;
+          t.rx += ccx - cx;
+          t.ry += ccy - cy;
+          cx = ccx;
+          cy = ccy;
         }
       }
 
-      t.speed = v; t.cx = cx; t.cy = cy;
+      t.speed = v;
+      t.cx = cx;
+      t.cy = cy;
+      t.brakeLights = brk && v > 1;
     }
 
-    truckHitsSolid(cx, cy) {
+    truckHitsSolid(cx, cy, heading) {
+      const hx = TRUCK.halfL;
+      const hy = TRUCK.halfW;
+      const cos = Math.cos(heading);
+      const sin = Math.sin(heading);
+      const ac = Math.abs(cos);
+      const as = Math.abs(sin);
+      const ex = ac * hx + as * hy;
+      const ey = as * hx + ac * hy;
+
       const list = this.solids[this.seg.id];
-      if (!list) return false;
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
-        if (Math.hypot(s.cx - cx, s.cy - cy) < TRUCK_RADIUS + s.r) return true;
+        const dx = s.cx - cx;
+        const dy = s.cy - cy;
+        const rr = TRUCK_RADIUS + s.r;
+        if (dx * dx + dy * dy > rr * rr) continue;
+        const hw = s.w / 2;
+        const hh = s.h / 2;
+        if (Math.abs(dx) >= ex + hw) continue;
+        if (Math.abs(dy) >= ey + hh) continue;
+        const du = dx * cos + dy * sin;
+        if (Math.abs(du) >= hx + (hw * ac + hh * as)) continue;
+        const dv = -dx * sin + dy * cos;
+        if (Math.abs(dv) >= hy + (hw * as + hh * ac)) continue;
+        return true;
       }
       return false;
     }
@@ -569,33 +704,13 @@
       this.cameras.main.shake(140, 0.004);
       if (this.hitCooldown <= 0) {
         this.hitCooldown = 1.2;
-        TC.ui.flash('Colisão! Condição: ' + Math.round(STORE.data.condition) + '%', 1800);
+        TC.ui.flash('Colisão! Condição do caminhão: ' + Math.round(STORE.data.condition) + '%', 1800);
       }
-    }
-
-    // Atualiza o movimento dos carros NPCs na BR e checa colisão
-    updateNpcTraffic(dt) {
-      if (this.seg.id !== 'br') {
-        this.npcCars.forEach(c => c.sprite.setVisible(false));
-        return;
-      }
-      this.npcCars.forEach(c => {
-        c.y -= c.speed * dt * c.dir;
-        if (c.y < SEGMENTS.br.oy) c.y = SEGMENTS.br.oy + SEGMENTS.br.h;
-        if (c.y > SEGMENTS.br.oy + SEGMENTS.br.h) c.y = SEGMENTS.br.oy;
-
-        c.sprite.setPosition(c.x, c.y).setVisible(true);
-
-        if (this.state === 'driving' && Math.hypot(this.truck.cx - c.x, this.truck.cy - c.y) < 60) {
-          this.applyDamage(15);
-          c.y += 150;
-        }
-      });
     }
 
     portalAt(cx, cy) {
       const seg = this.seg;
-      const MG = 60;
+      const MG = 80;
       const lx = cx - seg.ox;
       const ly = cy - seg.oy;
       for (let i = 0; i < PORTALS.length; i++) {
@@ -638,7 +753,8 @@
         if (p.arrive.axis === 'x') nx += off;
         else ny += off;
 
-        t.cx = nx; t.cy = ny;
+        t.cx = nx;
+        t.cy = ny;
         t.rx = nx - Math.cos(t.heading) * TRUCK.rearToCenter;
         t.ry = ny - Math.sin(t.heading) * TRUCK.rearToCenter;
         t.portalHit = null;
@@ -666,26 +782,38 @@
       const z = ZONES[key];
       if (z.seg !== this.seg.id) return false;
       const tol = ZONE_TOL;
-      return corners.every((pt) => pt.x >= z.x - tol && pt.x <= z.x + z.w + tol && pt.y >= z.y - tol && pt.y <= z.y + z.h + tol);
+      return corners.every(
+        (pt) => pt.x >= z.x - tol && pt.x <= z.x + z.w + tol && pt.y >= z.y - tol && pt.y <= z.y + z.h + tol
+      );
     }
 
     updateMission(dt) {
       const m = STORE.data.mission;
-      if (!m) { this.dwell = 0; return; }
+      if (!m) {
+        this.dwell = 0;
+        return;
+      }
       const c = STORE.contract(m.id);
       const zoneKey = m.stage === 'pickup' ? 'cargo' : c.to;
       const inZone = this.zoneContains(this.truckCorners(), zoneKey);
       const stopped = Math.abs(this.truck.speed) < 6;
 
-      if (m.stage === 'transit') { m.timeLeft -= dt; STORE.markDirty(); }
+      if (m.stage === 'transit') {
+        m.timeLeft -= dt;
+        STORE.markDirty();
+      }
+
       if (inZone && stopped) this.dwell += dt;
       else this.dwell = Math.max(0, this.dwell - dt * 2);
 
       if (this.dwell >= DWELL_TIME) {
         this.dwell = 0;
         if (m.stage === 'pickup') {
-          m.stage = 'transit'; m.timeLeft = c.time; m.damage = 0;
-          STORE.touch(); TC.ui.flash('Carga carregada!', 3400);
+          m.stage = 'transit';
+          m.timeLeft = c.time;
+          m.damage = 0;
+          STORE.touch();
+          TC.ui.flash('Carga carregada! Siga para ' + STORE.DEST[c.to].name + '.', 3400);
         } else {
           const res = STORE.completeMission();
           if (res) this.showSummary(res);
@@ -694,48 +822,245 @@
     }
 
     showSummary(res) {
-      let html = '<div class="sum-card"><div class="sum-head">ENTREGA CONCLUÍDA</div><div class="sum-title">' + res.title + '</div><dl><div><dt>Total</dt><dd>' + STORE.fmt(res.total) + '</dd></div></dl><button class="btn primary" data-close>Continuar</button></div>';
+      const f = STORE.fmt;
+      let html =
+        '<div class="sum-card">' +
+          '<div class="sum-head">ENTREGA CONCLUÍDA</div>' +
+          '<div class="sum-title">' + res.title + '</div><dl>' +
+          '<div><dt>Pagamento base</dt><dd>' + f(res.base) + '</dd></div>';
+      if (res.bonus) html += '<div class="plus"><dt>Bônus de rapidez</dt><dd>+ ' + f(res.bonus) + '</dd></div>';
+      if (res.late) html += '<div class="minus"><dt>Atraso na entrega</dt><dd>- ' + f(res.late) + '</dd></div>';
+      if (res.dmg) html += '<div class="minus"><dt>Carga avariada</dt><dd>- ' + f(res.dmg) + '</dd></div>';
+      html += '<div class="total"><dt>Total recebido</dt><dd>' + f(res.total) + '</dd></div></dl>';
+      if (res.levelUp) html += '<div class="sum-level">Sua transportadora subiu para o nível ' + res.level + '! Novos contratos liberados.</div>';
+      html += '<button class="btn primary" data-close>Continuar</button></div>';
       TC.ui.showSummary(html);
+    }
+
+    navInfo(zoneKey) {
+      const z = ZONES[zoneKey];
+      const ref = this.state === 'driving' ? { x: this.truck.cx, y: this.truck.cy } : { x: this.p.x, y: this.p.y };
+      let tx;
+      let ty;
+      let exit = false;
+      if (z.seg === this.seg.id) {
+        tx = z.x + z.w / 2;
+        ty = z.y + z.h / 2;
+      } else {
+        const hop = nextHop(this.seg.id, z.seg);
+        if (!hop) return null;
+        let best = null;
+        let bd = Infinity;
+        PORTALS.forEach((p) => {
+          if (p.seg !== this.seg.id || p.to !== hop) return;
+          const pt = portalPoint(p);
+          const d = Math.hypot(pt.x - ref.x, pt.y - ref.y);
+          if (d < bd) { bd = d; best = pt; }
+        });
+        if (!best) return null;
+        tx = best.x;
+        ty = best.y;
+        exit = true;
+      }
+      const dist = Math.hypot(tx - ref.x, ty - ref.y);
+      return { angle: Math.atan2(ty - ref.y, tx - ref.x), dist: (exit ? 'Saída ' : '') + fmtDist(dist) };
     }
 
     updateObjectiveUi() {
       TC.ui.setMoney(Math.round(STORE.data.money).toLocaleString('pt-BR'));
+
       const m = STORE.data.mission;
-      if (!m) { TC.ui.setMission(null); TC.ui.setNav(null); this.setBeacon(null); return; }
+      if (!m) {
+        TC.ui.setMission(null);
+        TC.ui.setNav(null);
+        this.setBeacon(null);
+        return;
+      }
       const c = STORE.contract(m.id);
       const pickup = m.stage === 'pickup';
-      TC.ui.setMission({ title: c.title, step: pickup ? 'Carregar na Zona de Carga' : 'Entregue no destino', time: fmtTime(m.timeLeft || c.time), progress: this.dwell > 0.05 ? this.dwell / DWELL_TIME : null });
+      const zoneKey = pickup ? 'cargo' : c.to;
+      const dest = STORE.DEST[c.to];
+
+      let time;
+      let cls = '';
+      if (pickup) {
+        time = 'Prazo ' + fmtTime(c.time);
+      } else if (m.timeLeft < 0) {
+        time = 'ATRASADO ' + fmtTime(-m.timeLeft);
+        cls = 'late';
+      } else {
+        time = fmtTime(m.timeLeft);
+        if (m.timeLeft < 20) cls = 'warn';
+      }
+
+      TC.ui.setMission({
+        title: c.title,
+        step: pickup ? '1/2 · Pare na Zona de Carga para carregar' : '2/2 · Entregue em ' + dest.name,
+        time: time,
+        timeClass: cls,
+        progress: this.dwell > 0.05 ? this.dwell / DWELL_TIME : null,
+        progressLabel: pickup ? 'Carregando…' : 'Descarregando…',
+      });
+
+      if (this.indoor) {
+        TC.ui.setNav(null);
+        this.setBeacon(null);
+      } else {
+        TC.ui.setNav(this.navInfo(zoneKey));
+        this.setBeacon(zoneKey);
+      }
     }
 
     updatePlayer(dt, inp) {
-      const p = this.p; const A = this.walkArea();
+      const p = this.p;
+      const A = this.walkArea();
+      const ox = p.x;
+      const oy = p.y;
+
       let dx = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
       let dy = (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
       let step = PLAYER.speed * dt;
-      if (dx || dy) { this.clearTarget(); const l = Math.hypot(dx, dy); dx /= l; dy /= l; }
-      else if (this.target) {
-        const tx = this.target.x - p.x; const ty = this.target.y - p.y; const dist = Math.hypot(tx, ty);
-        if (dist < 4) this.clearTarget(); else { dx = tx / dist; dy = ty / dist; step = Math.min(step, dist); }
+      let moving = false;
+
+      if (dx || dy) {
+        this.clearTarget();
+        const len = Math.hypot(dx, dy);
+        dx /= len;
+        dy /= len;
+        moving = true;
+      } else if (this.target) {
+        const tx = this.target.x - p.x;
+        const ty = this.target.y - p.y;
+        const dist = Math.hypot(tx, ty);
+        if (dist < 4) {
+          this.clearTarget();
+        } else {
+          dx = tx / dist;
+          dy = ty / dist;
+          step = Math.min(step, dist);
+          moving = true;
+        }
       }
-      p.x += dx * step; p.y += dy * step;
-      p.x = clamp(p.x, A.x0, A.x1); p.y = clamp(p.y, A.y0, A.y1);
+
+      if (moving) {
+        p.x += dx * step;
+        p.y += dy * step;
+        p.rotation = Phaser.Math.Angle.RotateTo(p.rotation, Math.atan2(dy, dx), 14 * dt);
+      }
+
+      if (!this.indoor) this.pushPlayerOutOfTruck();
+      if (COLLISIONS.player) this.collidePlayerSolids();
+      p.x = clamp(p.x, A.x0, A.x1);
+      p.y = clamp(p.y, A.y0, A.y1);
+
+      if (this.target) {
+        const moved = Math.hypot(p.x - ox, p.y - oy);
+        if (moved < step * 0.3) {
+          this.stuckTime += dt;
+          if (this.stuckTime > 0.35) this.clearTarget();
+        } else {
+          this.stuckTime = 0;
+        }
+      }
+    }
+
+    pushPlayerOutOfTruck() {
+      const t = this.truck;
+      const p = this.p;
+      const R = PLAYER.radius;
+      const cos = Math.cos(t.heading);
+      const sin = Math.sin(t.heading);
+
+      const rx = p.x - t.cx;
+      const ry = p.y - t.cy;
+      let lx = rx * cos + ry * sin;
+      let ly = -rx * sin + ry * cos;
+
+      const hx = TRUCK.halfL;
+      const hy = TRUCK.halfW;
+      const qx = clamp(lx, -hx, hx);
+      const qy = clamp(ly, -hy, hy);
+      const ddx = lx - qx;
+      const ddy = ly - qy;
+      const dist = Math.hypot(ddx, ddy);
+      if (dist >= R) return;
+
+      if (dist > 1e-4) {
+        const k = (R - dist) / dist;
+        lx += ddx * k;
+        ly += ddy * k;
+      } else {
+        const px = hx - Math.abs(lx);
+        const py = hy - Math.abs(ly);
+        if (px < py) lx = Math.sign(lx || 1) * (hx + R);
+        else ly = Math.sign(ly || 1) * (hy + R);
+      }
+
+      p.x = t.cx + lx * cos - ly * sin;
+      p.y = t.cy + lx * sin + ly * cos;
+    }
+
+    collidePlayerSolids() {
+      const p = this.p;
+      const R = PLAYER.radius;
+      const list = this.indoor ? this.inSolids : this.solids[this.seg.id];
+      for (let i = 0; i < list.length; i++) {
+        const s = list[i];
+        const qx = clamp(p.x, s.x, s.x + s.w);
+        const qy = clamp(p.y, s.y, s.y + s.h);
+        const dx = p.x - qx;
+        const dy = p.y - qy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= R * R) continue;
+        if (d2 > 1e-6) {
+          const d = Math.sqrt(d2);
+          const k = (R - d) / d;
+          p.x += dx * k;
+          p.y += dy * k;
+        } else {
+          const l = p.x - s.x, r = s.x + s.w - p.x, tp = p.y - s.y, b = s.y + s.h - p.y;
+          const m = Math.min(l, r, tp, b);
+          if (m === l) p.x = s.x - R;
+          else if (m === r) p.x = s.x + s.w + R;
+          else if (m === tp) p.y = s.y - R;
+          else p.y = s.y + s.h + R;
+        }
+      }
+    }
+
+    doorWorld() {
+      return toWorld(this.truck, TRUCK.door.x, TRUCK.door.y);
     }
 
     computeInteraction() {
-      const t = this.truck; const p = this.p;
+      const t = this.truck;
+      const p = this.p;
+
       if (this.state === 'driving') {
         if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) return null;
         return { id: 'truck-exit', label: 'Sair do Caminhão' };
       }
+
+      const cands = [];
       if (!this.indoor) {
-        if (Phaser.Math.Distance.Between(p.x, p.y, OFFICE_DOOR.x, OFFICE_DOOR.y) <= OFFICE_DOOR.r) return { id: 'office-enter', label: 'Entrar no Prédio' };
-        const d = toWorld(t, TRUCK.door.x, TRUCK.door.y);
-        if (Phaser.Math.Distance.Between(p.x, p.y, d.x, d.y) <= PLAYER.enterDist) return { id: 'truck-enter', label: 'Entrar no Caminhão' };
+        const d = this.doorWorld();
+        cands.push({ id: 'truck-enter', label: 'Entrar no Caminhão', x: d.x, y: d.y, r: PLAYER.enterDist });
+        if (this.seg.id === 'city') {
+          cands.push({ id: 'office-enter', label: 'Entrar no Prédio', x: OFFICE_DOOR.x, y: OFFICE_DOOR.y, r: OFFICE_DOOR.r });
+        }
       } else {
-        if (Phaser.Math.Distance.Between(p.x, p.y, ROOM_PC.x, ROOM_PC.y) <= ROOM_PC.r) return { id: 'pc-use', label: 'Usar Computador' };
-        if (Phaser.Math.Distance.Between(p.x, p.y, ROOM_EXIT.x, ROOM_EXIT.y) <= ROOM_EXIT.r) return { id: 'office-exit', label: 'Sair do Prédio' };
+        cands.push({ id: 'pc-use', label: 'Usar Computador', x: ROOM_PC.x, y: ROOM_PC.y, r: ROOM_PC.r });
+        cands.push({ id: 'office-exit', label: 'Sair do Prédio', x: ROOM_EXIT.x, y: ROOM_EXIT.y, r: ROOM_EXIT.r });
       }
-      return null;
+
+      let best = null;
+      let bestD = Infinity;
+      cands.forEach((c) => {
+        const d = Phaser.Math.Distance.Between(p.x, p.y, c.x, c.y);
+        if (d <= c.r && d < bestD) { best = c; bestD = d; }
+      });
+      if (!best) return null;
+      return { id: best.id, label: best.label };
     }
 
     positionAction() {
@@ -745,69 +1070,149 @@
 
     handleAction() {
       const it = this.interaction;
-      if (it) this.perform(it.id);
+      if (it) { this.perform(it.id); return; }
+      if (this.state === 'driving') TC.ui.flash('Reduza a velocidade para sair do caminhão.');
+      else if (this.indoor) TC.ui.flash('Aproxime-se do computador ou da porta.');
+      else TC.ui.flash('Chegue perto da porta do caminhão ou do escritório.');
     }
 
     perform(id) {
       switch (id) {
-        case 'truck-exit':
-          this.state = 'foot'; this.p.setPosition(this.truck.cx + 40, this.truck.cy).setVisible(true);
-          this.cameras.main.startFollow(this.p, true, 0.08, 0.08); TC.ui.setDriving(false); break;
-        case 'truck-enter':
-          this.state = 'driving'; this.p.setVisible(false);
-          this.cameras.main.startFollow(this.truckView, true, 0.08, 0.08); TC.ui.setDriving(true); break;
+        case 'truck-exit': this.tryExit(); break;
+        case 'truck-enter': this.tryEnter(); break;
         case 'office-enter': this.enterBuilding(); break;
         case 'office-exit': this.exitBuilding(); break;
         case 'pc-use': this.openComputer(); break;
+        default: break;
       }
+    }
+
+    tryExit() {
+      const t = this.truck;
+      if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) {
+        TC.ui.flash('Reduza a velocidade para sair do caminhão.');
+        return;
+      }
+      const R = PLAYER.radius;
+      const A = this.walkArea();
+      const pos = toWorld(t, TRUCK.door.x, -(TRUCK.halfW + R + 10));
+      this.p.setPosition(clamp(pos.x, A.x0, A.x1), clamp(pos.y, A.y0, A.y1));
+      this.p.rotation = t.heading - Math.PI / 2;
+      this.p.setVisible(true);
+
+      this.state = 'foot';
+      this.clearTarget();
+      this.cameras.main.startFollow(this.p, true, 0.08, 0.08);
+      TC.ui.setDriving(false);
+    }
+
+    tryEnter() {
+      this.state = 'driving';
+      this.p.setVisible(false);
+      this.clearTarget();
+      this.cameras.main.startFollow(this.truckView, true, 0.08, 0.08);
+      TC.ui.setDriving(true);
     }
 
     enterBuilding() {
       this.busy = true;
-      const cam = this.cameras.main; cam.fadeOut(220, 0, 0, 0);
+      this.clearTarget();
+      const cam = this.cameras.main;
+      cam.fadeOut(220, 0, 0, 0);
       this.time.delayedCall(240, () => {
         this.indoor = true;
         this.p.setPosition(ROOM_SPAWN.x, ROOM_SPAWN.y);
-        cam.stopFollow(); cam.removeBounds(); cam.setBackgroundColor('#05070a');
-        this.applyZoom(); cam.fadeIn(260, 0, 0, 0); this.busy = false;
+        this.p.rotation = -Math.PI / 2;
+        cam.stopFollow();
+        cam.removeBounds();
+        cam.setBackgroundColor('#0d1117');
+        this.applyZoom();
+        TC.ui.resetInputs();
+        cam.fadeIn(260, 0, 0, 0);
+        this.busy = false;
       });
     }
 
     exitBuilding() {
       this.busy = true;
-      const cam = this.cameras.main; cam.fadeOut(220, 0, 0, 0);
+      this.clearTarget();
+      const cam = this.cameras.main;
+      cam.fadeOut(220, 0, 0, 0);
       this.time.delayedCall(240, () => {
         this.indoor = false;
         this.p.setPosition(OFFICE_EXIT.x, OFFICE_EXIT.y);
-        cam.setBackgroundColor('#1d2b20'); this.applyBounds(); this.applyZoom();
-        cam.centerOn(this.p.x, this.p.y); cam.startFollow(this.p, true, 0.08, 0.08);
-        cam.fadeIn(260, 0, 0, 0); this.busy = false;
+        this.p.rotation = Math.PI / 2;
+        cam.setBackgroundColor('#1d2b20');
+        this.applyBounds();
+        this.applyZoom();
+        cam.centerOn(this.p.x, this.p.y);
+        cam.startFollow(this.p, true, 0.08, 0.08);
+        TC.ui.resetInputs();
+        cam.fadeIn(260, 0, 0, 0);
+        this.busy = false;
       });
     }
 
     openComputer() {
-      this.uiOpen = true; this.input.keyboard.enabled = false; TC.ui.resetInputs();
+      this.uiOpen = true;
+      this.clearTarget();
+      this.input.keyboard.enabled = false;
+      TC.ui.resetInputs();
+      const before = STORE.data.mission ? STORE.data.mission.id : null;
       TC.pc.open(() => {
-        this.uiOpen = false; this.input.keyboard.enabled = true;
-        this.input.keyboard.resetKeys(); TC.consumeAction();
+        this.uiOpen = false;
+        this.input.keyboard.enabled = true;
+        this.input.keyboard.resetKeys();
+        TC.consumeAction();
         this.refreshTruckLook();
+        const after = STORE.data.mission ? STORE.data.mission.id : null;
+        if (!before && after) TC.ui.flash('Contrato aceito! Vá até a Zona de Carga (amarela).', 3400);
+        else if (before && !after) TC.ui.flash('Contrato cancelado.', 2000);
       });
     }
 
     syncVisuals() {
       const t = this.truck;
       this.truckView.setPosition(t.cx, t.cy).setRotation(t.heading);
-      this.wheelFL.rotation = t.steer; this.wheelFR.rotation = t.steer;
+      this.wheelFL.rotation = t.steer;
+      this.wheelFR.rotation = t.steer;
+      const tail = t.brakeLights ? 0xff2a2a : 0x6b0000;
+      this.tailL.setFillStyle(tail);
+      this.tailR.setFillStyle(tail);
     }
 
     updateZonesAndHud() {
-      const t = this.truck; const corners = this.truckCorners();
+      const t = this.truck;
+      const corners = this.truckCorners();
+
       let status = '';
       ZONE_KEYS.forEach((key) => {
-        if (this.zoneContains(corners, key)) status = 'Na ' + ZONES[key].label;
+        const inside = this.zoneContains(corners, key);
+        if (inside !== !!this.zoneInside[key]) {
+          this.zoneInside[key] = inside;
+          this.drawZone(key, inside);
+        }
+        if (inside) {
+          status = (Math.abs(t.speed) < 5 ? 'ESTACIONADO: ' : 'Na ') + ZONES[key].label;
+        }
       });
-      let line = this.indoor ? 'Escritório' : Math.round(Math.abs(t.speed) / 4) + ' km/h';
+
+      let line;
+      if (this.indoor) {
+        line = 'Escritório';
+        status = '';
+      } else if (this.state === 'driving') {
+        const kmh = Math.round(Math.abs(t.speed) / 4);
+        const gear = t.speed < -1 ? 'R' : Math.abs(t.speed) < 1 ? 'N' : 'D';
+        const steerDeg = Math.round(Phaser.Math.RadToDeg(t.steer));
+        const cond = Math.round(STORE.data.condition);
+        line = (this.seg.id === 'city' ? '' : this.seg.name + ' · ') + kmh + ' km/h · ' + gear + ' · ' + steerDeg + '°';
+        if (cond < 60) line += ' · Cond. ' + cond + '%';
+      } else {
+        line = this.seg.id === 'city' ? 'A pé' : 'A pé · ' + this.seg.name;
+      }
       TC.ui.setHud(line, status);
+
       this.positionAction();
     }
   }
@@ -817,7 +1222,11 @@
       type: Phaser.AUTO,
       parent: 'game-container',
       backgroundColor: '#1d2b20',
-      scale: { mode: Phaser.Scale.RESIZE, width: '100%', height: '100%' },
+      scale: {
+        mode: Phaser.Scale.RESIZE,
+        width: '100%',
+        height: '100%',
+      },
       input: { activePointers: 3 },
       scene: [WorldScene],
     });
