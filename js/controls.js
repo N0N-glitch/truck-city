@@ -1,6 +1,6 @@
 /* ============================================================
-   TRUCK CITY - controls.js  (Atualização 4.0)
-   Setup de dispositivo, HUD, botão contextual e celular móvel.
+   TRUCK CITY - controls.js  (Fase 3)
+   Setup de dispositivo, HUD, botão contextual e controles mobile.
    ============================================================ */
 (function () {
   'use strict';
@@ -16,7 +16,6 @@
       gas: 0, brake: 0,
       wheel: 0,
       action: false,
-      phone: false, // Novo flag para o celular móvel
     },
     ui: {},
     startGame: function () { console.error('game.js não foi carregado.'); },
@@ -26,12 +25,6 @@
     const a = TC.input.action;
     TC.input.action = false;
     return a;
-  };
-
-  TC.consumePhone = function () {
-    const p = TC.input.phone;
-    TC.input.phone = false;
-    return p;
   };
 
   const el = {
@@ -63,7 +56,6 @@
     wheel: $('#wheel'),
     action: $('#btn-action'),
     actionLabel: $('#action-label'),
-    mobilePhone: $('#btn-mobile-phone'), // Botão do celular
   };
 
   document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -100,9 +92,9 @@
       el.controls.classList.remove('hidden');
       el.controls.classList.add('mode-' + mode);
       document.body.classList.add('mode-' + mode);
-      el.help.textContent = 'Toque no mapa para andar. Use o celular para gerenciar de qualquer lugar.';
+      el.help.textContent = 'Toque no mapa para andar. Aproxime-se de portas e objetos para interagir.';
     } else {
-      el.help.textContent = 'WASD/Setas: andar e dirigir · E/Espaço: interagir · P: Celular Móvel';
+      el.help.textContent = 'WASD/Setas: andar e dirigir · E ou Espaço: interagir · Clique: andar até o ponto';
     }
 
     TC.startGame();
@@ -129,21 +121,6 @@
   el.action.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     TC.input.action = true;
-  });
-
-  // Evento do botão de celular móvel
-  if (el.mobilePhone) {
-    el.mobilePhone.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      TC.input.phone = true;
-    });
-  }
-
-  // Atalho de teclado 'P' para abrir o celular se tiver o upgrade
-  window.addEventListener('keydown', (e) => {
-    if ((e.key === 'p' || e.key === 'P') && TC.store && TC.store.data.upgrades.mobile > 0) {
-      TC.input.phone = true;
-    }
   });
 
   const WHEEL_MAX = Math.PI * 0.75;
@@ -191,6 +168,7 @@
   }
 
   TC.ui.setMoney = function (text) { setText('money', el.money, text); };
+
   TC.ui.setHud = function (line, status) {
     setText('line', el.line, line);
     setText('status', el.status, status || '');
@@ -214,33 +192,60 @@
 
   TC.ui.setMission = function (info) {
     if (!info) {
-      if (cache.missionOn) { el.mission.classList.add('hidden'); cache.missionOn = false; }
+      if (cache.missionOn) {
+        el.mission.classList.add('hidden');
+        cache.missionOn = false;
+      }
       return;
     }
-    if (!cache.missionOn) { el.mission.classList.remove('hidden'); cache.missionOn = true; }
+    if (!cache.missionOn) {
+      el.mission.classList.remove('hidden');
+      cache.missionOn = true;
+    }
     setText('mTitle', el.mTitle, info.title);
     setText('mStep', el.mStep, info.step);
     setText('mTime', el.mTime, info.time || '');
     const cls = 'm-time ' + (info.timeClass || '');
-    if (cache.mTimeCls !== cls) { cache.mTimeCls = cls; el.mTime.className = cls; }
+    if (cache.mTimeCls !== cls) {
+      cache.mTimeCls = cls;
+      el.mTime.className = cls;
+    }
     if (info.progress == null) {
-      if (cache.progOn) { el.mProg.classList.add('hidden'); cache.progOn = false; }
+      if (cache.progOn) {
+        el.mProg.classList.add('hidden');
+        cache.progOn = false;
+      }
     } else {
-      if (!cache.progOn) { el.mProg.classList.remove('hidden'); cache.progOn = true; }
+      if (!cache.progOn) {
+        el.mProg.classList.remove('hidden');
+        cache.progOn = true;
+      }
       const w = Math.round(clamp(info.progress, 0, 1) * 100) + '%';
-      if (cache.progW !== w) { cache.progW = w; el.mProgBar.style.width = w; }
+      if (cache.progW !== w) {
+        cache.progW = w;
+        el.mProgBar.style.width = w;
+      }
       setText('mProgLabel', el.mProgLabel, info.progressLabel || '');
     }
   };
 
   TC.ui.setNav = function (info) {
     if (!info) {
-      if (cache.navOn) { el.mNav.classList.add('hidden'); cache.navOn = false; }
+      if (cache.navOn) {
+        el.mNav.classList.add('hidden');
+        cache.navOn = false;
+      }
       return;
     }
-    if (!cache.navOn) { el.mNav.classList.remove('hidden'); cache.navOn = true; }
+    if (!cache.navOn) {
+      el.mNav.classList.remove('hidden');
+      cache.navOn = true;
+    }
     const deg = Math.round((info.angle * 180) / Math.PI);
-    if (cache.navDeg !== deg) { cache.navDeg = deg; el.navArrow.style.transform = 'rotate(' + deg + 'deg)'; }
+    if (cache.navDeg !== deg) {
+      cache.navDeg = deg;
+      el.navArrow.style.transform = 'rotate(' + deg + 'deg)';
+    }
     setText('navDist', el.navDist, info.dist);
   };
 
@@ -252,27 +257,29 @@
     summaryTimer = setTimeout(() => el.summary.classList.add('hidden'), 10000);
   };
   el.summary.addEventListener('click', (e) => {
-    if (e.target.closest('[data-close]')) { clearTimeout(summaryTimer); el.summary.classList.add('hidden'); }
+    if (e.target.closest('[data-close]')) {
+      clearTimeout(summaryTimer);
+      el.summary.classList.add('hidden');
+    }
   });
 
   TC.ui.setAction = function (info) {
     if (!info) {
-      if (cache.actionOn) { el.action.classList.remove('show'); cache.actionOn = false; }
+      if (cache.actionOn) {
+        el.action.classList.remove('show');
+        cache.actionOn = false;
+      }
       return;
     }
     setText('actionLabel', el.actionLabel, info.label);
-    if (!cache.actionOn) { el.action.classList.add('show'); cache.actionOn = true; }
-  };
-
-  // Exibir ou ocultar o botão do celular (só aparece a pé se tiver o upgrade de celular móvel)
-  TC.ui.setMobilePhoneVisible = function (visible) {
-    if (!el.mobilePhone) return;
-    if (visible) el.mobilePhone.classList.remove('hidden');
-    else el.mobilePhone.classList.add('hidden');
+    if (!cache.actionOn) {
+      el.action.classList.add('show');
+      cache.actionOn = true;
+    }
   };
 
   TC.ui.resetInputs = function () {
-    Object.keys(TC.input).forEach((k) => { if (k !== 'action' && k !== 'phone') TC.input[k] = 0; });
+    Object.keys(TC.input).forEach((k) => { if (k !== 'action') TC.input[k] = 0; });
     document.querySelectorAll('[data-hold]').forEach((b) => b.classList.remove('active'));
     wheel.held = false;
     wheel.angle = 0;
