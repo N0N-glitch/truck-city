@@ -1,6 +1,5 @@
 /* ============================================================
-   TRUCK CITY - game.js  (Atualização 4.0 - Corrigido)
-   Física, Tráfego na BR, Portais Ajustados, Frota e Porão.
+   TRUCK CITY - game.js  (Fase 3 Original Estável)
    ============================================================ */
 (function () {
   'use strict';
@@ -18,6 +17,7 @@
     wheelbase: 90,
     rearToCenter: 45,
     door: { x: 40, y: -27 },
+
     maxFwd: 280,
     maxRev: 90,
     accel: 110,
@@ -25,26 +25,28 @@
     brake: 380,
     roll: 60,
     drag: 0.2,
+
     steerLow: 0.62,
     steerHigh: 0.22,
     steerRate: 1.9,
     steerReturn: 2.6,
+
     exitMaxSpeed: 40,
     spawn: { x: 700, y: 1000, heading: 0 },
   };
   const TRUCK_RADIUS = Math.hypot(TRUCK.halfL, TRUCK.halfW);
+
   const PLAYER = { radius: 11, speed: 150, enterDist: 70 };
+
   const DWELL_TIME = 2;
   const ZONE_TOL = 10;
 
-  // Segmentos e dimensões do mapa idênticos à versão estável anterior
   const SEGMENTS = {
-    city:     { id: 'city',     name: 'TRUCK CITY',          sub: 'Centro da cidade e Bairro',           ox: 0,    oy: 0, w: CFG.city.w,     h: CFG.city.h,     padX: 0,   padY: 0 },
-    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia com tráfego e acesso',          ox: 4000, oy: 0, w: CFG.br.w,       h: CFG.br.h,       padX: 800, padY: 0 },
-    district: { id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística e Portos',             ox: 8000, oy: 0, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400 },
+    city:     { id: 'city',     name: 'TRUCK CITY',          sub: 'Centro da cidade',                      ox: 0,    oy: 0, w: CFG.city.w,     h: CFG.city.h,     padX: 0,   padY: 0 },
+    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia · sentido Distrito Industrial', ox: 4000, oy: 0, w: CFG.br.w,       h: CFG.br.h,       padX: 800, padY: 0 },
+    district: { id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística',                        ox: 8000, oy: 0, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400 },
   };
 
-  // Portais corrigidos com base na versão estável da Fase 3
   const PORTALS = [
     { seg: 'city',     edge: 'S', min: 900,  max: 1100, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
     { seg: 'city',     edge: 'S', min: 1600, max: 1760, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
@@ -64,14 +66,12 @@
   const OFFICE = CFG.office;
   const OFFICE_DOOR = { x: 1350, y: 792, r: 72 };
   const OFFICE_EXIT = { x: 1350, y: 812 };
-  const BASEMENT_TRIGGER = { x: 1350, y: 640, r: 45 };
 
   const ROOM = CFG.room;
   const ROOM_WALK = { x0: ROOM.x + 26, y0: ROOM.y + 100, x1: ROOM.x + ROOM.w - 26, y1: ROOM.y + ROOM.h - 26 };
   const ROOM_SPAWN = { x: ROOM.x + 400, y: ROOM.y + 440 };
   const ROOM_EXIT = { x: ROOM.x + 400, y: ROOM.y + 515, r: 64 };
   const ROOM_PC = { x: ROOM.x + 570, y: ROOM.y + 222, r: 76 };
-  const HOMELESS_NPC = { x: ROOM.x + 120, y: ROOM.y + 160, r: 50 };
 
   const TREES = [
     [120, 120], [310, 80], [520, 150], [730, 100], [210, 205],
@@ -106,6 +106,35 @@
     return Math.max(10, Math.round(m / 10) * 10) + ' m';
   }
 
+  function portalPoint(p) {
+    const s = SEGMENTS[p.seg];
+    const mid = (p.min + p.max) / 2;
+    if (p.edge === 'S') return { x: s.ox + mid, y: s.oy + s.h };
+    if (p.edge === 'N') return { x: s.ox + mid, y: s.oy };
+    if (p.edge === 'E') return { x: s.ox + s.w, y: s.oy + mid };
+    return { x: s.ox, y: s.oy + mid };
+  }
+
+  function nextHop(from, to) {
+    if (from === to) return null;
+    const queue = [[from]];
+    const seen = {};
+    seen[from] = true;
+    while (queue.length) {
+      const path = queue.shift();
+      const last = path[path.length - 1];
+      for (let i = 0; i < PORTALS.length; i++) {
+        const p = PORTALS[i];
+        if (p.seg !== last || seen[p.to]) continue;
+        const np = path.concat(p.to);
+        if (p.to === to) return np[1];
+        seen[p.to] = true;
+        queue.push(np);
+      }
+    }
+    return null;
+  }
+
   class WorldScene extends Phaser.Scene {
     constructor() {
       super('World');
@@ -115,7 +144,6 @@
       this.seg = SEGMENTS.city;
       this.state = 'driving';
       this.indoor = false;
-      this.inBasement = false;
       this.uiOpen = false;
       this.busy = false;
       this.teleporting = false;
@@ -134,14 +162,12 @@
       this.cargoKey = null;
       this.beaconKey = undefined;
 
-      this.cars = [];
-
       this.buildTextures();
       this.buildCity();
       this.buildBR();
       this.buildDistrict();
       this.buildIndoor();
-      this.createTrucks();
+      this.createTruck();
       this.createPlayer();
       this.createBeacon();
       this.createInput();
@@ -170,7 +196,7 @@
       const cam = this.cameras.main;
       const w = this.scale.width;
       const h = this.scale.height;
-      if (this.indoor || this.inBasement) {
+      if (this.indoor) {
         const z = clamp(Math.min(w / (ROOM.w + 80), h / (ROOM.h + 80)), 0.35, 1.4);
         cam.setZoom(z);
         cam.centerOn(ROOM.x + ROOM.w / 2, ROOM.y + ROOM.h / 2);
@@ -234,6 +260,11 @@
           color: '#e6eef9', stroke: '#2c3a4d', strokeThickness: 4,
         })
         .setOrigin(0.5).setDepth(5).setAlpha(0.92);
+      this.add
+        .text(OFFICE.x + OFFICE.w / 2, OFFICE.y + 112, 'LOGÍSTICA & OBRAS', {
+          fontFamily: 'monospace', fontSize: '13px', color: '#c9d6e8',
+        })
+        .setOrigin(0.5).setDepth(5).setAlpha(0.9);
 
       this.addSolid(sol, OFFICE.x, OFFICE.y, OFFICE.w, OFFICE.h);
       CFG.hedges.forEach((h) => this.addSolid(sol, h.x, h.y, h.w, h.h));
@@ -245,16 +276,6 @@
 
       this.addSign(700, 1760, '▼ BR-116 · DISTRITO INDUSTRIAL');
       this.addSign(1540, 1760, '▼ BR-116');
-
-      this.updateHomelessHouseVisual();
-    }
-
-    updateHomelessHouseVisual() {
-      if (STORE.data.storyState === 'completed' && !this.homelessHouseImg) {
-        this.homelessHouseImg = this.add.rectangle(OFFICE.x - 120, OFFICE.y + 140, 80, 70, 0x8b5a2b).setStrokeStyle(2, 0x3e2723).setDepth(4);
-        this.add.text(OFFICE.x - 120, OFFICE.y + 130, 'Casa do Amigo', { fontSize: '10px', color: '#fff' }).setOrigin(0.5).setDepth(5);
-        this.addSolid(this.solids.city, OFFICE.x - 160, OFFICE.y + 100, 80, 70);
-      }
     }
 
     makeZone(key) {
@@ -263,8 +284,12 @@
       this.drawZone(key, false);
       this.add
         .text(z.x + z.w / 2, z.y + z.h / 2, z.label, {
-          fontFamily: 'monospace', fontSize: '22px', fontStyle: 'bold', color: '#ffffff',
-          stroke: '#000000', strokeThickness: 4,
+          fontFamily: 'monospace',
+          fontSize: '22px',
+          fontStyle: 'bold',
+          color: '#ffffff',
+          stroke: '#000000',
+          strokeThickness: 4,
         })
         .setOrigin(0.5)
         .setDepth(3);
@@ -334,57 +359,58 @@
       S(540, 420, 170, 70);
     }
 
-    createTrucks() {
+    createTruck() {
       const T = TRUCK;
       const h = T.spawn.heading;
 
       this.truck = {
-        heading: h, speed: 0, steer: 0, reverseLock: false, portalHit: null,
+        heading: h,
+        speed: 0,
+        steer: 0,
+        reverseLock: false,
+        portalHit: null,
         rx: T.spawn.x - Math.cos(h) * T.rearToCenter,
         ry: T.spawn.y - Math.sin(h) * T.rearToCenter,
-        cx: T.spawn.x, cy: T.spawn.y,
-        history: [],
+        cx: T.spawn.x,
+        cy: T.spawn.y,
       };
 
       const c = this.add.container(T.spawn.x, T.spawn.y).setDepth(10);
       const shadow = this.add.rectangle(3, 5, 140, 54, 0x000000, 0.25);
       const g = this.add.graphics();
+
       g.fillStyle(0xc4cad1, 1);
       g.fillRect(-70, -27, 92, 54);
       g.lineStyle(2, 0x6b7480, 1);
       g.strokeRect(-70, -27, 92, 54);
+
       g.fillStyle(0x0b0b0b, 1);
       g.fillRect(-56, -31, 22, 8);
       g.fillRect(-56, 23, 22, 8);
 
       this.cargoG = this.add.graphics();
       this.cabG = this.add.graphics();
+
       this.tailL = this.add.rectangle(-69, -19, 3, 10, 0x6b0000);
       this.tailR = this.add.rectangle(-69, 19, 3, 10, 0x6b0000);
+
       const fx = T.wheelbase / 2;
-      this.wheelFL = this.add.rectangle(fx, -27, 22, 8, 0x0b0b0b);
-      this.wheelFR = this.add.rectangle(fx, 27, 22, 8, 0x0b0b0b);
+      this.wheelFL = this.add.rectangle(fx, -27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
+      this.wheelFR = this.add.rectangle(fx, 27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
 
       c.add([shadow, g, this.cargoG, this.cabG, this.tailL, this.tailR, this.wheelFL, this.wheelFR]);
       this.truckView = c;
-
-      this.fleetViews = [];
-      for (let i = 0; i < 5; i++) {
-        const fc = this.add.container(-1000, -1000).setDepth(9).setVisible(false);
-        const fg = this.add.graphics();
-        fg.fillStyle(0xa0aab5, 1);
-        fg.fillRect(-70, -27, 92, 54);
-        fc.add(fg);
-        this.fleetViews.push(fc);
-      }
     }
 
     drawCab(hexStr) {
       const g = this.cabG;
       g.clear();
       const base = Phaser.Display.Color.HexStringToColor(hexStr).color;
+      const dark = Phaser.Display.Color.HexStringToColor(hexStr).darken(32).color;
       g.fillStyle(base, 1);
       g.fillRect(24, -25, 46, 50);
+      g.lineStyle(2, dark, 1);
+      g.strokeRect(24, -25, 46, 50);
       g.fillStyle(0x1b2a3a, 1);
       g.fillRect(52, -20, 12, 40);
     }
@@ -395,16 +421,32 @@
       if (!contractId) return;
       const c = STORE.contract(contractId);
       if (!c) return;
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(-64, -22, 26, 21);
+      const fill = Phaser.Display.Color.HexStringToColor(c.color).color;
+      const edge = Phaser.Display.Color.HexStringToColor(c.color).darken(32).color;
+      for (let r = 0; r < 2; r++) {
+        for (let k = 0; k < 3; k++) {
+          const x = -64 + k * 28;
+          const y = -22 + r * 23;
+          g.fillStyle(fill, 1);
+          g.fillRect(x, y, 26, 21);
+          g.lineStyle(2, edge, 1);
+          g.strokeRect(x, y, 26, 21);
+        }
+      }
     }
 
     refreshTruckLook() {
       const col = STORE.data.paint;
-      if (this.paintKey !== col) { this.paintKey = col; this.drawCab(col); }
+      if (this.paintKey !== col) {
+        this.paintKey = col;
+        this.drawCab(col);
+      }
       const m = STORE.data.mission;
       const key = m && m.stage === 'transit' ? m.id : '';
-      if (this.cargoKey !== key) { this.cargoKey = key; this.drawCargo(key); }
+      if (this.cargoKey !== key) {
+        this.cargoKey = key;
+        this.drawCargo(key);
+      }
     }
 
     createPlayer() {
@@ -412,19 +454,31 @@
       const body = this.add.circle(0, 0, PLAYER.radius, 0x2d7ff9).setStrokeStyle(2, 0xffffff);
       const nose = this.add.rectangle(9, 0, 8, 4, 0xffffff);
       this.p = this.add.container(0, 0, [shadow, body, nose]).setDepth(20).setVisible(false);
-      this.marker = this.add.circle(0, 0, 10, 0xffffff, 0.15).setStrokeStyle(2, 0xffffff).setDepth(5).setVisible(false);
+
+      this.marker = this.add
+        .circle(0, 0, 10, 0xffffff, 0.15)
+        .setStrokeStyle(2, 0xffffff)
+        .setDepth(5)
+        .setVisible(false);
     }
 
     createBeacon() {
-      this.beacon = this.add.rectangle(0, 0, 100, 100, 0xffffff, 0).setStrokeStyle(6, 0xffffff, 1).setDepth(6).setVisible(false);
+      this.beacon = this.add
+        .rectangle(0, 0, 100, 100, 0xffffff, 0)
+        .setStrokeStyle(6, 0xffffff, 1)
+        .setDepth(6)
+        .setVisible(false);
       this.tweens.add({ targets: this.beacon, alpha: 0.25, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
 
     setBeacon(zoneKey) {
-      const k = zoneKey && ZONES[zoneKey].seg === this.seg.id && !this.indoor && !this.inBasement ? zoneKey : null;
+      const k = zoneKey && ZONES[zoneKey].seg === this.seg.id && !this.indoor ? zoneKey : null;
       if (this.beaconKey === k) return;
       this.beaconKey = k;
-      if (!k) { this.beacon.setVisible(false); return; }
+      if (!k) {
+        this.beacon.setVisible(false);
+        return;
+      }
       const z = ZONES[k];
       this.beacon.setPosition(z.x + z.w / 2, z.y + z.h / 2).setSize(z.w + 16, z.h + 16).setVisible(true);
     }
@@ -436,17 +490,18 @@
         up: K.UP, left: K.LEFT, down: K.DOWN, right: K.RIGHT,
         e: K.E, space: K.SPACE,
       });
+
       if (this.input.mouse) this.input.mouse.disableContextMenu();
 
       this.input.on('pointerdown', (pointer) => {
-        if ((this.state !== 'foot' && !this.inBasement) || this.busy || this.uiOpen || this.teleporting) return;
+        if (this.state !== 'foot' || this.busy || this.uiOpen || this.teleporting) return;
         this.setTarget(pointer.worldX, pointer.worldY);
       });
     }
 
     walkArea() {
       const R = PLAYER.radius;
-      if (this.indoor || this.inBasement) {
+      if (this.indoor) {
         return { x0: ROOM_WALK.x0 + R, y0: ROOM_WALK.y0 + R, x1: ROOM_WALK.x1 - R, y1: ROOM_WALK.y1 - R };
       }
       const s = this.seg;
@@ -477,9 +532,13 @@
       let action = Phaser.Input.Keyboard.JustDown(k.e) || Phaser.Input.Keyboard.JustDown(k.space);
       if (TC.consumeAction()) action = true;
 
-      let phone = TC.consumePhone();
-
-      return { left, right, up, down, throttle: up || m.gas ? 1 : 0, brake: down || m.brake ? 1 : 0, steer: clamp((right ? 1 : 0) - (left ? 1 : 0) + m.wheel, -1, 1), action, phone };
+      return {
+        left, right, up, down,
+        throttle: up || m.gas ? 1 : 0,
+        brake: down || m.brake ? 1 : 0,
+        steer: clamp((right ? 1 : 0) - (left ? 1 : 0) + m.wheel, -1, 1),
+        action,
+      };
     }
 
     update(time, delta) {
@@ -492,11 +551,16 @@
 
       const frozen = this.uiOpen || this.busy || this.teleporting;
       let inp = this.readInput();
-      if (frozen) inp = { left: 0, right: 0, up: 0, down: 0, throttle: 0, brake: 0, steer: 0, action: false, phone: false };
+      if (frozen) {
+        inp = { left: 0, right: 0, up: 0, down: 0, throttle: 0, brake: 0, steer: 0, action: false };
+      }
 
       this.interaction = frozen ? null : this.computeInteraction();
 
-      if (this.teleporting) { this.positionAction(); return; }
+      if (this.teleporting) {
+        this.positionAction();
+        return;
+      }
 
       if (this.state === 'driving') {
         this.updateTruck(dt, inp, false);
@@ -506,15 +570,8 @@
       }
 
       if (inp.action) this.handleAction();
-      if (inp.phone && STORE.data.upgrades.mobile > 0) this.openComputer();
 
-      TC.ui.setMobilePhoneVisible(this.state === 'foot' && STORE.data.upgrades.mobile > 0 && !this.uiOpen);
-
-      if (!frozen && !this.indoor && !this.inBasement) {
-        this.updateMission(dt);
-        this.updateTraffic(dt);
-      }
-
+      if (!frozen && !this.indoor) this.updateMission(dt);
       this.checkPortal();
       this.refreshTruckLook();
       this.syncVisuals();
@@ -535,15 +592,25 @@
       const brk = inp.brake > 0;
       if (!brk) t.reverseLock = false;
 
-      if (parked) v = approach(v, 0, brakeF * 0.8 * dt);
-      else if (gas && !brk) {
+      if (parked) {
+        v = approach(v, 0, brakeF * 0.8 * dt);
+      } else if (gas && !brk) {
         if (v < 0) v = Math.min(0, v + brakeF * dt);
         else v += accel * (1 - 0.6 * (v / maxFwd)) * dt;
       } else if (brk && !gas) {
-        if (v > 1) { v = Math.max(0, v - brakeF * dt); t.reverseLock = true; }
-        else if (!t.reverseLock) v -= T.revAccel * dt;
-        else v = approach(v, 0, brakeF * dt);
-      } else v = approach(v, 0, (T.roll + Math.abs(v) * T.drag) * dt);
+        if (v > 1) {
+          v = Math.max(0, v - brakeF * dt);
+          t.reverseLock = true;
+        } else if (!t.reverseLock) {
+          v -= T.revAccel * dt;
+        } else {
+          v = approach(v, 0, brakeF * dt);
+        }
+      } else if (gas && brk) {
+        v = approach(v, 0, brakeF * dt);
+      } else {
+        v = approach(v, 0, (T.roll + Math.abs(v) * T.drag) * dt);
+      }
 
       v = clamp(v, -T.maxRev, maxFwd);
 
@@ -554,7 +621,9 @@
       t.steer = approach(t.steer, targetSteer, rate);
 
       const prev = { rx: t.rx, ry: t.ry, heading: t.heading };
+
       t.heading += (v / T.wheelbase) * Math.tan(t.steer) * dt;
+
       t.rx += Math.cos(t.heading) * v * dt;
       t.ry += Math.sin(t.heading) * v * dt;
 
@@ -562,28 +631,69 @@
       let cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
 
       if (COLLISIONS.truck && Math.abs(v) > 0.01 && this.truckHitsSolid(cx, cy, t.heading)) {
-        t.rx = prev.rx; t.ry = prev.ry; t.heading = prev.heading;
+        t.rx = prev.rx;
+        t.ry = prev.ry;
+        t.heading = prev.heading;
         cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
         cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
+        const sp = Math.abs(v);
         v = -v * 0.2;
-        this.applyDamage(10);
+        if (sp > 20) this.applyDamage((sp / maxFwd) * 12);
       }
 
-      t.speed = v; t.cx = cx; t.cy = cy; t.brakeLights = brk && v > 1;
-
-      if (Math.hypot(cx - (t.history[0]?.cx || 0), cy - (t.history[0]?.cy || 0)) > 20) {
-        t.history.unshift({ cx, cy, heading: t.heading });
-        if (t.history.length > 100) t.history.pop();
+      const seg = this.seg;
+      const MG = 80;
+      const hit = this.state === 'driving' ? this.portalAt(cx, cy) : null;
+      t.portalHit = hit;
+      if (!hit) {
+        const ccx = clamp(cx, seg.ox + MG, seg.ox + seg.w - MG);
+        const ccy = clamp(cy, seg.oy + MG, seg.oy + seg.h - MG);
+        if (ccx !== cx || ccy !== cy) {
+          if (this.state === 'driving' && Math.abs(v) > 60 && this.noticeCooldown <= 0) {
+            this.noticeCooldown = 3;
+            if (seg.id === 'city') TC.ui.flash('Fim da via. A saída para a BR-116 fica ao sul.', 2600);
+            else if (seg.id === 'district') TC.ui.flash('Fim do pátio. A saída para a BR-116 fica ao norte.', 2600);
+            else TC.ui.flash('Fim da pista.', 1800);
+          }
+          v *= 0.6;
+          t.rx += ccx - cx;
+          t.ry += ccy - cy;
+          cx = ccx;
+          cy = ccy;
+        }
       }
+
+      t.speed = v;
+      t.cx = cx;
+      t.cy = cy;
+      t.brakeLights = brk && v > 1;
     }
 
     truckHitsSolid(cx, cy, heading) {
-      const hx = TRUCK.halfL; const hy = TRUCK.halfW;
+      const hx = TRUCK.halfL;
+      const hy = TRUCK.halfW;
+      const cos = Math.cos(heading);
+      const sin = Math.sin(heading);
+      const ac = Math.abs(cos);
+      const as = Math.abs(sin);
+      const ex = ac * hx + as * hy;
+      const ey = as * hx + ac * hy;
+
       const list = this.solids[this.seg.id];
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
-        const dx = s.cx - cx; const dy = s.cy - cy;
-        if (Math.hypot(dx, dy) > TRUCK_RADIUS + s.r) continue;
+        const dx = s.cx - cx;
+        const dy = s.cy - cy;
+        const rr = TRUCK_RADIUS + s.r;
+        if (dx * dx + dy * dy > rr * rr) continue;
+        const hw = s.w / 2;
+        const hh = s.h / 2;
+        if (Math.abs(dx) >= ex + hw) continue;
+        if (Math.abs(dy) >= ey + hh) continue;
+        const du = dx * cos + dy * sin;
+        if (Math.abs(du) >= hx + (hw * ac + hh * as)) continue;
+        const dv = -dx * sin + dy * cos;
+        if (Math.abs(dv) >= hy + (hw * as + hh * ac)) continue;
         return true;
       }
       return false;
@@ -594,61 +704,24 @@
       this.cameras.main.shake(140, 0.004);
       if (this.hitCooldown <= 0) {
         this.hitCooldown = 1.2;
-        TC.ui.flash('Colisão! Condição: ' + Math.round(STORE.data.condition) + '%', 1800);
+        TC.ui.flash('Colisão! Condição do caminhão: ' + Math.round(STORE.data.condition) + '%', 1800);
       }
     }
 
-    updateTraffic(dt) {
-      if (this.seg.id !== 'br') {
-        this.cars.forEach(c => c.sprite.setVisible(false));
-        return;
-      }
-      if (this.cars.length === 0) {
-        for (let i = 0; i < 4; i++) {
-          const g = this.add.rectangle(0, 0, 50, 24, 0xd9534f).setDepth(8);
-          this.cars.push({ sprite: g, y: i * 1200 + 500, speed: 220 + Math.random() * 80 });
-        }
-      }
-      this.cars.forEach(car => {
-        car.y -= car.speed * dt;
-        if (car.y < this.seg.oy) car.y = this.seg.oy + this.seg.h;
-        const carX = this.seg.ox + 460;
-        car.sprite.setPosition(carX, car.y).setVisible(true);
-
-        if (this.state === 'driving' && Math.hypot(this.truck.cx - carX, this.truck.cy - car.y) < 60) {
-          this.applyDamage(15);
-          car.y -= 200;
-        }
-      });
-    }
-
-    // Detector de portais preciso baseado na Fase 3
     portalAt(cx, cy) {
-      const seg = this.seg; 
-      const lx = cx - seg.ox; 
+      const seg = this.seg;
+      const MG = 80;
+      const lx = cx - seg.ox;
       const ly = cy - seg.oy;
-      const MG = 60;
-
       for (let i = 0; i < PORTALS.length; i++) {
         const p = PORTALS[i];
         if (p.seg !== seg.id) continue;
-        let hit = false; 
+        let hit = false;
         let lat = 0;
-
-        if (p.edge === 'S') { 
-          hit = ly >= seg.h - MG; 
-          lat = lx; 
-        } else if (p.edge === 'N') { 
-          hit = ly <= MG; 
-          lat = lx; 
-        } else if (p.edge === 'E') { 
-          hit = lx >= seg.w - MG; 
-          lat = ly; 
-        } else if (p.edge === 'W') { 
-          hit = lx <= MG; 
-          lat = ly; 
-        }
-
+        if (p.edge === 'S') { hit = ly >= seg.h - MG; lat = lx; }
+        else if (p.edge === 'N') { hit = ly <= MG; lat = lx; }
+        else if (p.edge === 'E') { hit = lx >= seg.w - MG; lat = ly; }
+        else { hit = lx <= MG; lat = ly; }
         if (hit && lat >= p.min && lat <= p.max) return p;
       }
       return null;
@@ -656,50 +729,52 @@
 
     checkPortal() {
       const t = this.truck;
-      if (this.state !== 'driving' || this.teleporting || this.indoor || this.portalCooldown > 0) return;
-      
-      const hit = this.portalAt(t.cx, t.cy);
-      if (hit) {
-        this.startTeleport(hit);
-      }
+      if (this.state !== 'driving' || this.teleporting || this.indoor || this.portalCooldown > 0 || !t.portalHit) return;
+      this.startTeleport(t.portalHit);
     }
 
     startTeleport(p) {
-      this.teleporting = true; 
-      this.clearTarget(); 
+      this.teleporting = true;
+      this.clearTarget();
       TC.ui.resetInputs();
-      const cam = this.cameras.main; 
+      const cam = this.cameras.main;
       cam.fadeOut(200, 0, 0, 0);
 
       this.time.delayedCall(230, () => {
-        const t = this.truck; 
-        const from = this.seg; 
+        const t = this.truck;
+        const from = this.seg;
         const to = SEGMENTS[p.to];
 
+        const lateralIsX = p.edge === 'N' || p.edge === 'S';
+        const lat = lateralIsX ? t.cx - from.ox : t.cy - from.oy;
+        const off = clamp(lat - (p.min + p.max) / 2, -p.spread, p.spread);
         let nx = to.ox + p.arrive.x;
         let ny = to.oy + p.arrive.y;
+        if (p.arrive.axis === 'x') nx += off;
+        else ny += off;
 
-        t.cx = nx; 
+        t.cx = nx;
         t.cy = ny;
         t.rx = nx - Math.cos(t.heading) * TRUCK.rearToCenter;
         t.ry = ny - Math.sin(t.heading) * TRUCK.rearToCenter;
         t.portalHit = null;
 
-        this.setSegment(to); 
+        this.setSegment(to);
         this.syncVisuals();
-        cam.stopFollow(); 
-        cam.centerOn(nx, ny); 
+        cam.stopFollow();
+        cam.centerOn(nx, ny);
         cam.startFollow(this.truckView, true, 0.08, 0.08);
         cam.fadeIn(240, 0, 0, 0);
 
-        this.portalCooldown = 1.5; 
+        this.portalCooldown = 1.5;
         this.teleporting = false;
         TC.ui.banner(to.name, to.sub);
       });
     }
 
     truckCorners() {
-      const hx = TRUCK.halfL; const hy = TRUCK.halfW;
+      const hx = TRUCK.halfL;
+      const hy = TRUCK.halfW;
       return [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map((c) => toWorld(this.truck, c[0], c[1]));
     }
 
@@ -707,96 +782,285 @@
       const z = ZONES[key];
       if (z.seg !== this.seg.id) return false;
       const tol = ZONE_TOL;
-      return corners.every((pt) => pt.x >= z.x - tol && pt.x <= z.x + z.w + tol && pt.y >= z.y - tol && pt.y <= z.y + z.h + tol);
+      return corners.every(
+        (pt) => pt.x >= z.x - tol && pt.x <= z.x + z.w + tol && pt.y >= z.y - tol && pt.y <= z.y + z.h + tol
+      );
     }
 
     updateMission(dt) {
       const m = STORE.data.mission;
-      if (!m) { this.dwell = 0; return; }
+      if (!m) {
+        this.dwell = 0;
+        return;
+      }
       const c = STORE.contract(m.id);
       const zoneKey = m.stage === 'pickup' ? 'cargo' : c.to;
       const inZone = this.zoneContains(this.truckCorners(), zoneKey);
       const stopped = Math.abs(this.truck.speed) < 6;
 
-      if (m.stage === 'transit') { m.timeLeft -= dt; STORE.markDirty(); }
+      if (m.stage === 'transit') {
+        m.timeLeft -= dt;
+        STORE.markDirty();
+      }
+
       if (inZone && stopped) this.dwell += dt;
       else this.dwell = Math.max(0, this.dwell - dt * 2);
 
       if (this.dwell >= DWELL_TIME) {
         this.dwell = 0;
         if (m.stage === 'pickup') {
-          m.stage = 'transit'; m.timeLeft = c.time; m.damage = 0;
-          STORE.touch(); TC.ui.flash('Carga carregada!', 3400);
+          m.stage = 'transit';
+          m.timeLeft = c.time;
+          m.damage = 0;
+          STORE.touch();
+          TC.ui.flash('Carga carregada! Siga para ' + STORE.DEST[c.to].name + '.', 3400);
         } else {
           const res = STORE.completeMission();
-          if (res) {
-            this.showSummary(res);
-            this.updateHomelessHouseVisual();
-          }
+          if (res) this.showSummary(res);
         }
       }
     }
 
     showSummary(res) {
-      let html = '<div class="sum-card"><div class="sum-head">ENTREGA CONCLUÍDA</div><div class="sum-title">' + res.title + '</div><dl><div><dt>Total</dt><dd>' + STORE.fmt(res.total) + '</dd></div></dl>';
-      if (res.levelUp) html += '<div class="sum-level">Nível da Transportadora: ' + res.level + '!</div>';
+      const f = STORE.fmt;
+      let html =
+        '<div class="sum-card">' +
+          '<div class="sum-head">ENTREGA CONCLUÍDA</div>' +
+          '<div class="sum-title">' + res.title + '</div><dl>' +
+          '<div><dt>Pagamento base</dt><dd>' + f(res.base) + '</dd></div>';
+      if (res.bonus) html += '<div class="plus"><dt>Bônus de rapidez</dt><dd>+ ' + f(res.bonus) + '</dd></div>';
+      if (res.late) html += '<div class="minus"><dt>Atraso na entrega</dt><dd>- ' + f(res.late) + '</dd></div>';
+      if (res.dmg) html += '<div class="minus"><dt>Carga avariada</dt><dd>- ' + f(res.dmg) + '</dd></div>';
+      html += '<div class="total"><dt>Total recebido</dt><dd>' + f(res.total) + '</dd></div></dl>';
+      if (res.levelUp) html += '<div class="sum-level">Sua transportadora subiu para o nível ' + res.level + '! Novos contratos liberados.</div>';
       html += '<button class="btn primary" data-close>Continuar</button></div>';
       TC.ui.showSummary(html);
     }
 
+    navInfo(zoneKey) {
+      const z = ZONES[zoneKey];
+      const ref = this.state === 'driving' ? { x: this.truck.cx, y: this.truck.cy } : { x: this.p.x, y: this.p.y };
+      let tx;
+      let ty;
+      let exit = false;
+      if (z.seg === this.seg.id) {
+        tx = z.x + z.w / 2;
+        ty = z.y + z.h / 2;
+      } else {
+        const hop = nextHop(this.seg.id, z.seg);
+        if (!hop) return null;
+        let best = null;
+        let bd = Infinity;
+        PORTALS.forEach((p) => {
+          if (p.seg !== this.seg.id || p.to !== hop) return;
+          const pt = portalPoint(p);
+          const d = Math.hypot(pt.x - ref.x, pt.y - ref.y);
+          if (d < bd) { bd = d; best = pt; }
+        });
+        if (!best) return null;
+        tx = best.x;
+        ty = best.y;
+        exit = true;
+      }
+      const dist = Math.hypot(tx - ref.x, ty - ref.y);
+      return { angle: Math.atan2(ty - ref.y, tx - ref.x), dist: (exit ? 'Saída ' : '') + fmtDist(dist) };
+    }
+
     updateObjectiveUi() {
       TC.ui.setMoney(Math.round(STORE.data.money).toLocaleString('pt-BR'));
+
       const m = STORE.data.mission;
-      if (!m) { TC.ui.setMission(null); TC.ui.setNav(null); this.setBeacon(null); return; }
+      if (!m) {
+        TC.ui.setMission(null);
+        TC.ui.setNav(null);
+        this.setBeacon(null);
+        return;
+      }
       const c = STORE.contract(m.id);
       const pickup = m.stage === 'pickup';
-      TC.ui.setMission({ title: c.title, step: pickup ? 'Carregar na Zona de Carga' : 'Entregue no destino', time: fmtTime(m.timeLeft || c.time), progress: this.dwell > 0.05 ? this.dwell / DWELL_TIME : null });
+      const zoneKey = pickup ? 'cargo' : c.to;
+      const dest = STORE.DEST[c.to];
+
+      let time;
+      let cls = '';
+      if (pickup) {
+        time = 'Prazo ' + fmtTime(c.time);
+      } else if (m.timeLeft < 0) {
+        time = 'ATRASADO ' + fmtTime(-m.timeLeft);
+        cls = 'late';
+      } else {
+        time = fmtTime(m.timeLeft);
+        if (m.timeLeft < 20) cls = 'warn';
+      }
+
+      TC.ui.setMission({
+        title: c.title,
+        step: pickup ? '1/2 · Pare na Zona de Carga para carregar' : '2/2 · Entregue em ' + dest.name,
+        time: time,
+        timeClass: cls,
+        progress: this.dwell > 0.05 ? this.dwell / DWELL_TIME : null,
+        progressLabel: pickup ? 'Carregando…' : 'Descarregando…',
+      });
+
+      if (this.indoor) {
+        TC.ui.setNav(null);
+        this.setBeacon(null);
+      } else {
+        TC.ui.setNav(this.navInfo(zoneKey));
+        this.setBeacon(zoneKey);
+      }
     }
 
     updatePlayer(dt, inp) {
-      const p = this.p; const A = this.walkArea();
+      const p = this.p;
+      const A = this.walkArea();
+      const ox = p.x;
+      const oy = p.y;
+
       let dx = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
       let dy = (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
       let step = PLAYER.speed * dt;
-      if (dx || dy) { this.clearTarget(); const l = Math.hypot(dx, dy); dx /= l; dy /= l; }
-      else if (this.target) {
-        const tx = this.target.x - p.x; const ty = this.target.y - p.y; const dist = Math.hypot(tx, ty);
-        if (dist < 4) this.clearTarget(); else { dx = tx / dist; dy = ty / dist; step = Math.min(step, dist); }
+      let moving = false;
+
+      if (dx || dy) {
+        this.clearTarget();
+        const len = Math.hypot(dx, dy);
+        dx /= len;
+        dy /= len;
+        moving = true;
+      } else if (this.target) {
+        const tx = this.target.x - p.x;
+        const ty = this.target.y - p.y;
+        const dist = Math.hypot(tx, ty);
+        if (dist < 4) {
+          this.clearTarget();
+        } else {
+          dx = tx / dist;
+          dy = ty / dist;
+          step = Math.min(step, dist);
+          moving = true;
+        }
       }
-      p.x += dx * step; p.y += dy * step;
-      p.x = clamp(p.x, A.x0, A.x1); p.y = clamp(p.y, A.y0, A.y1);
+
+      if (moving) {
+        p.x += dx * step;
+        p.y += dy * step;
+        p.rotation = Phaser.Math.Angle.RotateTo(p.rotation, Math.atan2(dy, dx), 14 * dt);
+      }
+
+      if (!this.indoor) this.pushPlayerOutOfTruck();
       if (COLLISIONS.player) this.collidePlayerSolids();
+      p.x = clamp(p.x, A.x0, A.x1);
+      p.y = clamp(p.y, A.y0, A.y1);
+
+      if (this.target) {
+        const moved = Math.hypot(p.x - ox, p.y - oy);
+        if (moved < step * 0.3) {
+          this.stuckTime += dt;
+          if (this.stuckTime > 0.35) this.clearTarget();
+        } else {
+          this.stuckTime = 0;
+        }
+      }
+    }
+
+    pushPlayerOutOfTruck() {
+      const t = this.truck;
+      const p = this.p;
+      const R = PLAYER.radius;
+      const cos = Math.cos(t.heading);
+      const sin = Math.sin(t.heading);
+
+      const rx = p.x - t.cx;
+      const ry = p.y - t.cy;
+      let lx = rx * cos + ry * sin;
+      let ly = -rx * sin + ry * cos;
+
+      const hx = TRUCK.halfL;
+      const hy = TRUCK.halfW;
+      const qx = clamp(lx, -hx, hx);
+      const qy = clamp(ly, -hy, hy);
+      const ddx = lx - qx;
+      const ddy = ly - qy;
+      const dist = Math.hypot(ddx, ddy);
+      if (dist >= R) return;
+
+      if (dist > 1e-4) {
+        const k = (R - dist) / dist;
+        lx += ddx * k;
+        ly += ddy * k;
+      } else {
+        const px = hx - Math.abs(lx);
+        const py = hy - Math.abs(ly);
+        if (px < py) lx = Math.sign(lx || 1) * (hx + R);
+        else ly = Math.sign(ly || 1) * (hy + R);
+      }
+
+      p.x = t.cx + lx * cos - ly * sin;
+      p.y = t.cy + lx * sin + ly * cos;
     }
 
     collidePlayerSolids() {
-      const p = this.p; const R = PLAYER.radius;
-      const list = this.indoor || this.inBasement ? this.inSolids : this.solids[this.seg.id];
+      const p = this.p;
+      const R = PLAYER.radius;
+      const list = this.indoor ? this.inSolids : this.solids[this.seg.id];
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
-        const qx = clamp(p.x, s.x, s.x + s.w); const qy = clamp(p.y, s.y, s.y + s.h);
-        if (Math.hypot(p.x - qx, p.y - qy) < R) { p.x += (p.x - qx) * 0.5; p.y += (p.y - qy) * 0.5; }
+        const qx = clamp(p.x, s.x, s.x + s.w);
+        const qy = clamp(p.y, s.y, s.y + s.h);
+        const dx = p.x - qx;
+        const dy = p.y - qy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= R * R) continue;
+        if (d2 > 1e-6) {
+          const d = Math.sqrt(d2);
+          const k = (R - d) / d;
+          p.x += dx * k;
+          p.y += dy * k;
+        } else {
+          const l = p.x - s.x, r = s.x + s.w - p.x, tp = p.y - s.y, b = s.y + s.h - p.y;
+          const m = Math.min(l, r, tp, b);
+          if (m === l) p.x = s.x - R;
+          else if (m === r) p.x = s.x + s.w + R;
+          else if (m === tp) p.y = s.y - R;
+          else p.y = s.y + s.h + R;
+        }
       }
     }
 
+    doorWorld() {
+      return toWorld(this.truck, TRUCK.door.x, TRUCK.door.y);
+    }
+
     computeInteraction() {
-      const t = this.truck; const p = this.p;
+      const t = this.truck;
+      const p = this.p;
+
       if (this.state === 'driving') {
         if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) return null;
         return { id: 'truck-exit', label: 'Sair do Caminhão' };
       }
-      if (!this.indoor && !this.inBasement) {
-        if (Phaser.Math.Distance.Between(p.x, p.y, OFFICE_DOOR.x, OFFICE_DOOR.y) <= OFFICE_DOOR.r) return { id: 'office-enter', label: 'Entrar no Prédio' };
-        if (Phaser.Math.Distance.Between(p.x, p.y, BASEMENT_TRIGGER.x, BASEMENT_TRIGGER.y) <= BASEMENT_TRIGGER.r) return { id: 'basement-enter', label: 'Entrar no Porão' };
-        const d = toWorld(t, TRUCK.door.x, TRUCK.door.y);
-        if (Phaser.Math.Distance.Between(p.x, p.y, d.x, d.y) <= PLAYER.enterDist) return { id: 'truck-enter', label: 'Entrar no Caminhão' };
-      } else if (this.indoor) {
-        if (Phaser.Math.Distance.Between(p.x, p.y, ROOM_PC.x, ROOM_PC.y) <= ROOM_PC.r) return { id: 'pc-use', label: 'Usar Computador' };
-        if (Phaser.Math.Distance.Between(p.x, p.y, ROOM_EXIT.x, ROOM_EXIT.y) <= ROOM_EXIT.r) return { id: 'office-exit', label: 'Sair do Prédio' };
-      } else if (this.inBasement) {
-        if (Phaser.Math.Distance.Between(p.x, p.y, ROOM_EXIT.x, ROOM_EXIT.y) <= ROOM_EXIT.r) return { id: 'basement-exit', label: 'Sair do Porão' };
-        if (Phaser.Math.Distance.Between(p.x, p.y, HOMELESS_NPC.x, HOMELESS_NPC.y) <= HOMELESS_NPC.r && STORE.data.storyState === 'none') return { id: 'talk-homeless', label: 'Falar com pessoa' };
+
+      const cands = [];
+      if (!this.indoor) {
+        const d = this.doorWorld();
+        cands.push({ id: 'truck-enter', label: 'Entrar no Caminhão', x: d.x, y: d.y, r: PLAYER.enterDist });
+        if (this.seg.id === 'city') {
+          cands.push({ id: 'office-enter', label: 'Entrar no Prédio', x: OFFICE_DOOR.x, y: OFFICE_DOOR.y, r: OFFICE_DOOR.r });
+        }
+      } else {
+        cands.push({ id: 'pc-use', label: 'Usar Computador', x: ROOM_PC.x, y: ROOM_PC.y, r: ROOM_PC.r });
+        cands.push({ id: 'office-exit', label: 'Sair do Prédio', x: ROOM_EXIT.x, y: ROOM_EXIT.y, r: ROOM_EXIT.r });
       }
-      return null;
+
+      let best = null;
+      let bestD = Infinity;
+      cands.forEach((c) => {
+        const d = Phaser.Math.Distance.Between(p.x, p.y, c.x, c.y);
+        if (d <= c.r && d < bestD) { best = c; bestD = d; }
+      });
+      if (!best) return null;
+      return { id: best.id, label: best.label };
     }
 
     positionAction() {
@@ -806,109 +1070,149 @@
 
     handleAction() {
       const it = this.interaction;
-      if (it) this.perform(it.id);
+      if (it) { this.perform(it.id); return; }
+      if (this.state === 'driving') TC.ui.flash('Reduza a velocidade para sair do caminhão.');
+      else if (this.indoor) TC.ui.flash('Aproxime-se do computador ou da porta.');
+      else TC.ui.flash('Chegue perto da porta do caminhão ou do escritório.');
     }
 
     perform(id) {
       switch (id) {
-        case 'truck-exit':
-          this.state = 'foot'; this.p.setPosition(this.truck.cx + 40, this.truck.cy).setVisible(true);
-          this.cameras.main.startFollow(this.p, true, 0.08, 0.08); TC.ui.setDriving(false); break;
-        case 'truck-enter':
-          this.state = 'driving'; this.p.setVisible(false);
-          this.cameras.main.startFollow(this.truckView, true, 0.08, 0.08); TC.ui.setDriving(true); break;
-        case 'office-enter': this.enterBuilding(false); break;
-        case 'basement-enter':
-          if (STORE.data.upgrades.flashlight < 1) {
-            TC.ui.flash('Está tudo muito escuro. Você precisa de uma Lanterna!', 3000);
-            return;
-          }
-          this.enterBuilding(true); break;
-        case 'office-exit':
-        case 'basement-exit': this.exitBuilding(); break;
+        case 'truck-exit': this.tryExit(); break;
+        case 'truck-enter': this.tryEnter(); break;
+        case 'office-enter': this.enterBuilding(); break;
+        case 'office-exit': this.exitBuilding(); break;
         case 'pc-use': this.openComputer(); break;
-        case 'talk-homeless': this.startHomelessDialog(); break;
+        default: break;
       }
     }
 
-    enterBuilding(basement) {
+    tryExit() {
+      const t = this.truck;
+      if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) {
+        TC.ui.flash('Reduza a velocidade para sair do caminhão.');
+        return;
+      }
+      const R = PLAYER.radius;
+      const A = this.walkArea();
+      const pos = toWorld(t, TRUCK.door.x, -(TRUCK.halfW + R + 10));
+      this.p.setPosition(clamp(pos.x, A.x0, A.x1), clamp(pos.y, A.y0, A.y1));
+      this.p.rotation = t.heading - Math.PI / 2;
+      this.p.setVisible(true);
+
+      this.state = 'foot';
+      this.clearTarget();
+      this.cameras.main.startFollow(this.p, true, 0.08, 0.08);
+      TC.ui.setDriving(false);
+    }
+
+    tryEnter() {
+      this.state = 'driving';
+      this.p.setVisible(false);
+      this.clearTarget();
+      this.cameras.main.startFollow(this.truckView, true, 0.08, 0.08);
+      TC.ui.setDriving(true);
+    }
+
+    enterBuilding() {
       this.busy = true;
-      const cam = this.cameras.main; cam.fadeOut(220, 0, 0, 0);
+      this.clearTarget();
+      const cam = this.cameras.main;
+      cam.fadeOut(220, 0, 0, 0);
       this.time.delayedCall(240, () => {
-        if (basement) this.inBasement = true; else this.indoor = true;
+        this.indoor = true;
         this.p.setPosition(ROOM_SPAWN.x, ROOM_SPAWN.y);
-        cam.stopFollow(); cam.removeBounds(); cam.setBackgroundColor('#05070a');
-        this.applyZoom(); cam.fadeIn(260, 0, 0, 0); this.busy = false;
+        this.p.rotation = -Math.PI / 2;
+        cam.stopFollow();
+        cam.removeBounds();
+        cam.setBackgroundColor('#0d1117');
+        this.applyZoom();
+        TC.ui.resetInputs();
+        cam.fadeIn(260, 0, 0, 0);
+        this.busy = false;
       });
     }
 
     exitBuilding() {
       this.busy = true;
-      const cam = this.cameras.main; cam.fadeOut(220, 0, 0, 0);
+      this.clearTarget();
+      const cam = this.cameras.main;
+      cam.fadeOut(220, 0, 0, 0);
       this.time.delayedCall(240, () => {
-        this.indoor = false; this.inBasement = false;
+        this.indoor = false;
         this.p.setPosition(OFFICE_EXIT.x, OFFICE_EXIT.y);
-        cam.setBackgroundColor('#1d2b20'); this.applyBounds(); this.applyZoom();
-        cam.centerOn(this.p.x, this.p.y); cam.startFollow(this.p, true, 0.08, 0.08);
-        cam.fadeIn(260, 0, 0, 0); this.busy = false;
+        this.p.rotation = Math.PI / 2;
+        cam.setBackgroundColor('#1d2b20');
+        this.applyBounds();
+        this.applyZoom();
+        cam.centerOn(this.p.x, this.p.y);
+        cam.startFollow(this.p, true, 0.08, 0.08);
+        TC.ui.resetInputs();
+        cam.fadeIn(260, 0, 0, 0);
+        this.busy = false;
       });
     }
 
-    startHomelessDialog() {
-      this.uiOpen = true;
-      const d1 = window.confirm('Você: "O que você está fazendo aqui?"\n[Continuar]');
-      if (!d1) { this.uiOpen = false; return; }
-      alert('Morador: "Não tenho casa, por isso estou aqui."');
-      alert('Morador: "Estou vendo seu uniforme, você trabalha em uma construtora, não é?"');
-      const d2 = window.confirm('Você responde: "Sim."\nMorador: "Você poderia construir uma casa para mim?"\n\n[Clique em OK para SIM ou Cancelar para NÃO]');
-      
-      if (d2) {
-        STORE.data.storyState = 'accepted';
-        STORE.touch();
-        alert('Você aceitou ajudar! Missões especiais de construção liberadas na sua central.');
-      } else {
-        STORE.data.storyState = 'refused';
-        STORE.touch();
-        alert('Você o denunciou à polícia e ele foi levado.');
-      }
-      this.uiOpen = false;
-    }
-
     openComputer() {
-      this.uiOpen = true; this.input.keyboard.enabled = false; TC.ui.resetInputs();
+      this.uiOpen = true;
+      this.clearTarget();
+      this.input.keyboard.enabled = false;
+      TC.ui.resetInputs();
+      const before = STORE.data.mission ? STORE.data.mission.id : null;
       TC.pc.open(() => {
-        this.uiOpen = false; this.input.keyboard.enabled = true;
-        this.input.keyboard.resetKeys(); TC.consumeAction();
+        this.uiOpen = false;
+        this.input.keyboard.enabled = true;
+        this.input.keyboard.resetKeys();
+        TC.consumeAction();
         this.refreshTruckLook();
+        const after = STORE.data.mission ? STORE.data.mission.id : null;
+        if (!before && after) TC.ui.flash('Contrato aceito! Vá até a Zona de Carga (amarela).', 3400);
+        else if (before && !after) TC.ui.flash('Contrato cancelado.', 2000);
       });
     }
 
     syncVisuals() {
       const t = this.truck;
       this.truckView.setPosition(t.cx, t.cy).setRotation(t.heading);
-      this.wheelFL.rotation = t.steer; this.wheelFR.rotation = t.steer;
-
-      const fleetCount = STORE.data.fleetCount;
-      for (let i = 0; i < this.fleetViews.length; i++) {
-        const fv = this.fleetViews[i];
-        if (i < fleetCount && t.history.length > (i + 1) * 15) {
-          const pt = t.history[(i + 1) * 15];
-          fv.setPosition(pt.cx, pt.cy).setRotation(pt.heading).setVisible(true);
-        } else {
-          fv.setVisible(false);
-        }
-      }
+      this.wheelFL.rotation = t.steer;
+      this.wheelFR.rotation = t.steer;
+      const tail = t.brakeLights ? 0xff2a2a : 0x6b0000;
+      this.tailL.setFillStyle(tail);
+      this.tailR.setFillStyle(tail);
     }
 
     updateZonesAndHud() {
-      const t = this.truck; const corners = this.truckCorners();
+      const t = this.truck;
+      const corners = this.truckCorners();
+
       let status = '';
       ZONE_KEYS.forEach((key) => {
         const inside = this.zoneContains(corners, key);
-        if (inside) status = 'Na ' + ZONES[key].label;
+        if (inside !== !!this.zoneInside[key]) {
+          this.zoneInside[key] = inside;
+          this.drawZone(key, inside);
+        }
+        if (inside) {
+          status = (Math.abs(t.speed) < 5 ? 'ESTACIONADO: ' : 'Na ') + ZONES[key].label;
+        }
       });
-      let line = this.indoor || this.inBasement ? 'Escritório / Porão' : Math.round(Math.abs(t.speed) / 4) + ' km/h';
+
+      let line;
+      if (this.indoor) {
+        line = 'Escritório';
+        status = '';
+      } else if (this.state === 'driving') {
+        const kmh = Math.round(Math.abs(t.speed) / 4);
+        const gear = t.speed < -1 ? 'R' : Math.abs(t.speed) < 1 ? 'N' : 'D';
+        const steerDeg = Math.round(Phaser.Math.RadToDeg(t.steer));
+        const cond = Math.round(STORE.data.condition);
+        line = (this.seg.id === 'city' ? '' : this.seg.name + ' · ') + kmh + ' km/h · ' + gear + ' · ' + steerDeg + '°';
+        if (cond < 60) line += ' · Cond. ' + cond + '%';
+      } else {
+        line = this.seg.id === 'city' ? 'A pé' : 'A pé · ' + this.seg.name;
+      }
       TC.ui.setHud(line, status);
+
       this.positionAction();
     }
   }
@@ -918,7 +1222,11 @@
       type: Phaser.AUTO,
       parent: 'game-container',
       backgroundColor: '#1d2b20',
-      scale: { mode: Phaser.Scale.RESIZE, width: '100%', height: '100%' },
+      scale: {
+        mode: Phaser.Scale.RESIZE,
+        width: '100%',
+        height: '100%',
+      },
       input: { activePointers: 3 },
       scene: [WorldScene],
     });
