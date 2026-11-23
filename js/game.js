@@ -1,6 +1,6 @@
 /* ============================================================
-   TRUCK CITY - game.js  (Atualização 4.0)
-   Física, Tráfego na BR, Frota em Comboio, Celular Móvel e Easter Egg do Porão.
+   TRUCK CITY - game.js  (Atualização 4.0 - Corrigido)
+   Física, Tráfego na BR, Portais Ajustados, Frota e Porão.
    ============================================================ */
 (function () {
   'use strict';
@@ -37,12 +37,14 @@
   const DWELL_TIME = 2;
   const ZONE_TOL = 10;
 
+  // Segmentos e dimensões do mapa idênticos à versão estável anterior
   const SEGMENTS = {
     city:     { id: 'city',     name: 'TRUCK CITY',          sub: 'Centro da cidade e Bairro',           ox: 0,    oy: 0, w: CFG.city.w,     h: CFG.city.h,     padX: 0,   padY: 0 },
-    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia com tráfego e acesso à Cidade', ox: 4000, oy: 0, w: CFG.br.w,       h: CFG.br.h,       padX: 800, padY: 0 },
+    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia com tráfego e acesso',          ox: 4000, oy: 0, w: CFG.br.w,       h: CFG.br.h,       padX: 800, padY: 0 },
     district: { id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística e Portos',             ox: 8000, oy: 0, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400 },
   };
 
+  // Portais corrigidos com base na versão estável da Fase 3
   const PORTALS = [
     { seg: 'city',     edge: 'S', min: 900,  max: 1100, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
     { seg: 'city',     edge: 'S', min: 1600, max: 1760, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
@@ -62,14 +64,14 @@
   const OFFICE = CFG.office;
   const OFFICE_DOOR = { x: 1350, y: 792, r: 72 };
   const OFFICE_EXIT = { x: 1350, y: 812 };
-  const BASEMENT_TRIGGER = { x: 1350, y: 640, r: 45 }; // Paredes de trás do escritório
+  const BASEMENT_TRIGGER = { x: 1350, y: 640, r: 45 };
 
   const ROOM = CFG.room;
   const ROOM_WALK = { x0: ROOM.x + 26, y0: ROOM.y + 100, x1: ROOM.x + ROOM.w - 26, y1: ROOM.y + ROOM.h - 26 };
   const ROOM_SPAWN = { x: ROOM.x + 400, y: ROOM.y + 440 };
   const ROOM_EXIT = { x: ROOM.x + 400, y: ROOM.y + 515, r: 64 };
   const ROOM_PC = { x: ROOM.x + 570, y: ROOM.y + 222, r: 76 };
-  const HOMELESS_NPC = { x: ROOM.x + 120, y: ROOM.y + 160, r: 50 }; // Canto escuro do porão
+  const HOMELESS_NPC = { x: ROOM.x + 120, y: ROOM.y + 160, r: 50 };
 
   const TREES = [
     [120, 120], [310, 80], [520, 150], [730, 100], [210, 205],
@@ -104,35 +106,6 @@
     return Math.max(10, Math.round(m / 10) * 10) + ' m';
   }
 
-  function portalPoint(p) {
-    const s = SEGMENTS[p.seg];
-    const mid = (p.min + p.max) / 2;
-    if (p.edge === 'S') return { x: s.ox + mid, y: s.oy + s.h };
-    if (p.edge === 'N') return { x: s.ox + mid, y: s.oy };
-    if (p.edge === 'E') return { x: s.ox + s.w, y: s.oy + mid };
-    return { x: s.ox, y: s.oy + mid };
-  }
-
-  function nextHop(from, to) {
-    if (from === to) return null;
-    const queue = [[from]];
-    const seen = {};
-    seen[from] = true;
-    while (queue.length) {
-      const path = queue.shift();
-      const last = path[path.length - 1];
-      for (let i = 0; i < PORTALS.length; i++) {
-        const p = PORTALS[i];
-        if (p.seg !== last || seen[p.to]) continue;
-        const np = path.concat(p.to);
-        if (p.to === to) return np[1];
-        seen[p.to] = true;
-        queue.push(np);
-      }
-    }
-    return null;
-  }
-
   class WorldScene extends Phaser.Scene {
     constructor() {
       super('World');
@@ -142,7 +115,7 @@
       this.seg = SEGMENTS.city;
       this.state = 'driving';
       this.indoor = false;
-      this.inBasement = false; // Dentro do porão secreto
+      this.inBasement = false;
       this.uiOpen = false;
       this.busy = false;
       this.teleporting = false;
@@ -161,7 +134,7 @@
       this.cargoKey = null;
       this.beaconKey = undefined;
 
-      this.cars = []; // Tráfego de carros na BR
+      this.cars = [];
 
       this.buildTextures();
       this.buildCity();
@@ -254,7 +227,6 @@
       this.makeZone('cargo');
       this.makeZone('work');
 
-      // Prédio do escritório
       this.add.image(OFFICE.x - 10, OFFICE.y - 20, 'tex-office').setOrigin(0).setDepth(4);
       this.add
         .text(OFFICE.x + OFFICE.w / 2, OFFICE.y + 80, 'TRUCK CITY', {
@@ -262,11 +234,6 @@
           color: '#e6eef9', stroke: '#2c3a4d', strokeThickness: 4,
         })
         .setOrigin(0.5).setDepth(5).setAlpha(0.92);
-      this.add
-        .text(OFFICE.x + OFFICE.w / 2, OFFICE.y + 112, 'LOGÍSTICA & OBRAS', {
-          fontFamily: 'monospace', fontSize: '13px', color: '#c9d6e8',
-        })
-        .setOrigin(0.5).setDepth(5).setAlpha(0.9);
 
       this.addSolid(sol, OFFICE.x, OFFICE.y, OFFICE.w, OFFICE.h);
       CFG.hedges.forEach((h) => this.addSolid(sol, h.x, h.y, h.w, h.h));
@@ -279,7 +246,6 @@
       this.addSign(700, 1760, '▼ BR-116 · DISTRITO INDUSTRIAL');
       this.addSign(1540, 1760, '▼ BR-116');
 
-      // Casinha construída do morador de rua (ao lado do escritório se a missão foi completada!)
       this.updateHomelessHouseVisual();
     }
 
@@ -300,7 +266,8 @@
           fontFamily: 'monospace', fontSize: '22px', fontStyle: 'bold', color: '#ffffff',
           stroke: '#000000', strokeThickness: 4,
         })
-        .setOrigin(0.5).setDepth(3);
+        .setOrigin(0.5)
+        .setDepth(3);
     }
 
     drawZone(key, active) {
@@ -376,7 +343,7 @@
         rx: T.spawn.x - Math.cos(h) * T.rearToCenter,
         ry: T.spawn.y - Math.sin(h) * T.rearToCenter,
         cx: T.spawn.x, cy: T.spawn.y,
-        history: [], // Histórico de posições para a frota em comboio
+        history: [],
       };
 
       const c = this.add.container(T.spawn.x, T.spawn.y).setDepth(10);
@@ -401,7 +368,6 @@
       c.add([shadow, g, this.cargoG, this.cabG, this.tailL, this.tailR, this.wheelFL, this.wheelFR]);
       this.truckView = c;
 
-      // Caminhões da Frota em Comboio
       this.fleetViews = [];
       for (let i = 0; i < 5; i++) {
         const fc = this.add.container(-1000, -1000).setDepth(9).setVisible(false);
@@ -446,7 +412,6 @@
       const body = this.add.circle(0, 0, PLAYER.radius, 0x2d7ff9).setStrokeStyle(2, 0xffffff);
       const nose = this.add.rectangle(9, 0, 8, 4, 0xffffff);
       this.p = this.add.container(0, 0, [shadow, body, nose]).setDepth(20).setVisible(false);
-
       this.marker = this.add.circle(0, 0, 10, 0xffffff, 0.15).setStrokeStyle(2, 0xffffff).setDepth(5).setVisible(false);
     }
 
@@ -543,7 +508,6 @@
       if (inp.action) this.handleAction();
       if (inp.phone && STORE.data.upgrades.mobile > 0) this.openComputer();
 
-      // Botão do celular móvel visível apenas fora do caminhão
       TC.ui.setMobilePhoneVisible(this.state === 'foot' && STORE.data.upgrades.mobile > 0 && !this.uiOpen);
 
       if (!frozen && !this.indoor && !this.inBasement) {
@@ -607,7 +571,6 @@
 
       t.speed = v; t.cx = cx; t.cy = cy; t.brakeLights = brk && v > 1;
 
-      // Salva histórico para comboio da frota
       if (Math.hypot(cx - (t.history[0]?.cx || 0), cy - (t.history[0]?.cy || 0)) > 20) {
         t.history.unshift({ cx, cy, heading: t.heading });
         if (t.history.length > 100) t.history.pop();
@@ -616,7 +579,6 @@
 
     truckHitsSolid(cx, cy, heading) {
       const hx = TRUCK.halfL; const hy = TRUCK.halfW;
-      const cos = Math.cos(heading); const sin = Math.sin(heading);
       const list = this.solids[this.seg.id];
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
@@ -636,14 +598,12 @@
       }
     }
 
-    // Gerenciamento de Tráfego de Carros na BR
     updateTraffic(dt) {
       if (this.seg.id !== 'br') {
         this.cars.forEach(c => c.sprite.setVisible(false));
         return;
       }
       if (this.cars.length === 0) {
-        // Cria carros NPC na rodovia
         for (let i = 0; i < 4; i++) {
           const g = this.add.rectangle(0, 0, 50, 24, 0xd9534f).setDepth(8);
           this.cars.push({ sprite: g, y: i * 1200 + 500, speed: 220 + Math.random() * 80 });
@@ -652,10 +612,9 @@
       this.cars.forEach(car => {
         car.y -= car.speed * dt;
         if (car.y < this.seg.oy) car.y = this.seg.oy + this.seg.h;
-        const carX = this.seg.ox + 460; // Pista da BR
+        const carX = this.seg.ox + 460;
         car.sprite.setPosition(carX, car.y).setVisible(true);
 
-        // Colisão com o caminhão
         if (this.state === 'driving' && Math.hypot(this.truck.cx - carX, this.truck.cy - car.y) < 60) {
           this.applyDamage(15);
           car.y -= 200;
@@ -663,15 +622,33 @@
       });
     }
 
+    // Detector de portais preciso baseado na Fase 3
     portalAt(cx, cy) {
-      const seg = this.seg; const MG = 80;
-      const lx = cx - seg.ox; const ly = cy - seg.oy;
+      const seg = this.seg; 
+      const lx = cx - seg.ox; 
+      const ly = cy - seg.oy;
+      const MG = 60;
+
       for (let i = 0; i < PORTALS.length; i++) {
         const p = PORTALS[i];
         if (p.seg !== seg.id) continue;
-        let hit = false; let lat = 0;
-        if (p.edge === 'S') { hit = ly >= seg.h - MG; lat = lx; }
-        else if (p.edge === 'N') { hit = ly <= MG; lat = lx; }
+        let hit = false; 
+        let lat = 0;
+
+        if (p.edge === 'S') { 
+          hit = ly >= seg.h - MG; 
+          lat = lx; 
+        } else if (p.edge === 'N') { 
+          hit = ly <= MG; 
+          lat = lx; 
+        } else if (p.edge === 'E') { 
+          hit = lx >= seg.w - MG; 
+          lat = ly; 
+        } else if (p.edge === 'W') { 
+          hit = lx <= MG; 
+          lat = ly; 
+        }
+
         if (hit && lat >= p.min && lat <= p.max) return p;
       }
       return null;
@@ -679,23 +656,44 @@
 
     checkPortal() {
       const t = this.truck;
-      if (this.state !== 'driving' || this.teleporting || this.indoor || this.portalCooldown > 0 || !t.portalHit) return;
-      this.startTeleport(t.portalHit);
+      if (this.state !== 'driving' || this.teleporting || this.indoor || this.portalCooldown > 0) return;
+      
+      const hit = this.portalAt(t.cx, t.cy);
+      if (hit) {
+        this.startTeleport(hit);
+      }
     }
 
     startTeleport(p) {
-      this.teleporting = true; this.clearTarget(); TC.ui.resetInputs();
-      const cam = this.cameras.main; cam.fadeOut(200, 0, 0, 0);
+      this.teleporting = true; 
+      this.clearTarget(); 
+      TC.ui.resetInputs();
+      const cam = this.cameras.main; 
+      cam.fadeOut(200, 0, 0, 0);
+
       this.time.delayedCall(230, () => {
-        const t = this.truck; const from = this.seg; const to = SEGMENTS[p.to];
-        const lat = t.cx - from.ox;
-        let nx = to.ox + p.arrive.x + clamp(lat - 1000, -50, 50);
+        const t = this.truck; 
+        const from = this.seg; 
+        const to = SEGMENTS[p.to];
+
+        let nx = to.ox + p.arrive.x;
         let ny = to.oy + p.arrive.y;
-        t.cx = nx; t.cy = ny; t.portalHit = null;
-        this.setSegment(to); this.syncVisuals();
-        cam.stopFollow(); cam.centerOn(nx, ny); cam.startFollow(this.truckView, true, 0.08, 0.08);
+
+        t.cx = nx; 
+        t.cy = ny;
+        t.rx = nx - Math.cos(t.heading) * TRUCK.rearToCenter;
+        t.ry = ny - Math.sin(t.heading) * TRUCK.rearToCenter;
+        t.portalHit = null;
+
+        this.setSegment(to); 
+        this.syncVisuals();
+        cam.stopFollow(); 
+        cam.centerOn(nx, ny); 
+        cam.startFollow(this.truckView, true, 0.08, 0.08);
         cam.fadeIn(240, 0, 0, 0);
-        this.portalCooldown = 1.5; this.teleporting = false;
+
+        this.portalCooldown = 1.5; 
+        this.teleporting = false;
         TC.ui.banner(to.name, to.sub);
       });
     }
@@ -733,7 +731,7 @@
           const res = STORE.completeMission();
           if (res) {
             this.showSummary(res);
-            this.updateHomelessHouseVisual(); // Atualiza se desbloqueou a casinha
+            this.updateHomelessHouseVisual();
           }
         }
       }
@@ -746,20 +744,13 @@
       TC.ui.showSummary(html);
     }
 
-    navInfo(zoneKey) {
-      const z = ZONES[zoneKey];
-      const ref = this.state === 'driving' ? { x: this.truck.cx, y: this.truck.cy } : { x: this.p.x, y: this.p.y };
-      if (z.seg === this.seg.id) return { angle: Math.atan2(z.y - ref.y, z.x - ref.x), dist: fmtDist(Math.hypot(z.x - ref.x, z.y - ref.y)) };
-      return null;
-    }
-
     updateObjectiveUi() {
       TC.ui.setMoney(Math.round(STORE.data.money).toLocaleString('pt-BR'));
       const m = STORE.data.mission;
       if (!m) { TC.ui.setMission(null); TC.ui.setNav(null); this.setBeacon(null); return; }
       const c = STORE.contract(m.id);
       const pickup = m.stage === 'pickup';
-      TC.ui.setMission({ title: c.title, step: pickup ? 'Carregar na Zona de Carga' : 'Entregue no destino', time: fmtTime(c.timeLeft || c.time), progress: this.dwell > 0.05 ? this.dwell / DWELL_TIME : null });
+      TC.ui.setMission({ title: c.title, step: pickup ? 'Carregar na Zona de Carga' : 'Entregue no destino', time: fmtTime(m.timeLeft || c.time), progress: this.dwell > 0.05 ? this.dwell / DWELL_TIME : null });
     }
 
     updatePlayer(dt, inp) {
@@ -863,7 +854,6 @@
       });
     }
 
-    // Diálogo Exato do Easter Egg do Morador de Rua
     startHomelessDialog() {
       this.uiOpen = true;
       const d1 = window.confirm('Você: "O que você está fazendo aqui?"\n[Continuar]');
@@ -873,12 +863,10 @@
       const d2 = window.confirm('Você responde: "Sim."\nMorador: "Você poderia construir uma casa para mim?"\n\n[Clique em OK para SIM ou Cancelar para NÃO]');
       
       if (d2) {
-        // SIM: Aceitou construir a casa de graça
         STORE.data.storyState = 'accepted';
         STORE.touch();
         alert('Você aceitou ajudar! Missões especiais de construção liberadas na sua central.');
       } else {
-        // NÃO: Denunciou à polícia
         STORE.data.storyState = 'refused';
         STORE.touch();
         alert('Você o denunciou à polícia e ele foi levado.');
@@ -900,7 +888,6 @@
       this.truckView.setPosition(t.cx, t.cy).setRotation(t.heading);
       this.wheelFL.rotation = t.steer; this.wheelFR.rotation = t.steer;
 
-      // Sincroniza frota em comboio se contratada
       const fleetCount = STORE.data.fleetCount;
       for (let i = 0; i < this.fleetViews.length; i++) {
         const fv = this.fleetViews[i];
