@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#10161c" />
   <title>TRUCK CITY - Fase 4</title>
-  <!-- ?v=4 evita que o GitHub Pages/navegador sirva arquivos antigos do cache -->
-  <link rel="stylesheet" href="css/style.css?v=4" />
+  <!-- ?v=5 evita que o GitHub Pages/navegador sirva arquivos antigos do cache -->
+  <link rel="stylesheet" href="css/style.css?v=5" />
+  <link rel="stylesheet" href="css/extra.css?v=5" />
 </head>
 <body>
 
@@ -73,6 +74,11 @@
     <span id="action-label"></span><span class="key">E</span>
   </button>
 
+  <!-- CELULAR MÓVEL: canto inferior direito; só aparece a pé, depois de comprado (ver extra.css) -->
+  <button id="btn-phone" type="button" aria-label="Abrir celular" title="Celular">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.4"/><path d="M11 18.5h2"/></svg>
+  </button>
+
   <!-- CONTROLES MOBILE -->
   <div id="controls" class="hidden">
 
@@ -104,7 +110,7 @@
     </div>
   </div>
 
-  <!-- COMPUTADOR DA TRANSPORTADORA (TruckOS) -->
+  <!-- COMPUTADOR DA TRANSPORTADORA (TruckOS) / CELULAR -->
   <div id="pc-ui" class="hidden" role="dialog" aria-label="Computador da transportadora">
     <div id="os">
       <div id="os-top">
@@ -144,7 +150,7 @@
           <span class="tile tone-slate">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
           </span>
-          <span class="dlbl">Desktop</span>
+          <span class="dlbl">Início</span>
         </button>
         <div id="dock-apps"></div>
         <button class="dock-btn power" data-act="power" title="Desligar e voltar ao jogo">
@@ -158,13 +164,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-  <script src="js/controls.js?v=4"></script>
-  <script src="js/store.js?v=4"></script>
-  <script src="js/art.js?v=4"></script>
-  <script src="js/art2.js?v=4"></script>
-  <script src="js/traffic.js?v=4"></script>
-  <script src="js/content.js?v=4"></script>
-  <script src="js/pc.js?v=4"></script>
-  <script src="js/game.js?v=4"></script>
+  <script src="js/controls.js?v=5"></script>
+  <script src="js/store.js?v=5"></script>
+  <script src="js/art.js?v=5"></script>
+  <script src="js/art2.js?v=5"></script>
+  <script src="js/traffic.js?v=5"></script>
+  <script src="js/content.js?v=5"></script>
+  <script src="js/pc.js?v=5"></script>
+  <script src="js/game.js?v=5"></script>
 </body>
 </html>
