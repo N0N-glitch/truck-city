@@ -1,7 +1,8 @@
 /* ============================================================
-   TRUCK CITY - pc.js  (Fase 4B) - TruckOS
+   TRUCK CITY - pc.js  (Fase 4C) - TruckOS
    Computador da transportadora E modo "celular" (Celular Móvel):
-   área de trabalho, janelas e apps (Contratos, Loja, Banco, Garagem, Empresa).
+   área de trabalho, janelas e apps
+   (Contratos, Loja, Frota, Banco, Garagem, Empresa).
    Uso: TC.pc.open(callbackAoFechar)  -> computador do escritório
         TC.pc.openPhone()             -> celular (só se já foi comprado)
    ============================================================ */
@@ -21,6 +22,8 @@
     clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5"/><path d="M9 13l2.2 2.2L15.5 11"/>',
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><circle cx="16.5" cy="14.5" r="1.3"/>',
     truck: '<path d="M2 6.5h11V16H2z"/><path d="M13 9.5h4l3 3.2V16h-7z"/><circle cx="6.5" cy="17.5" r="2"/><circle cx="16.5" cy="17.5" r="2"/>',
+    convoy: '<rect x="1.5" y="8" width="8" height="6" rx="1"/><path d="M9.5 9.5h2.5l1.5 2v2.5h-4z"/><circle cx="4.5" cy="15.5" r="1.4"/><circle cx="11" cy="15.5" r="1.4"/><path d="M15 9h7M15 12h5M15 15h7"/>',
+    user: '<circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.6 3-6 7-6s7 2.4 7 6"/>',
     building: '<path d="M4 21V6l8-3 8 3v15"/><path d="M9 9h2M13 9h2M9 13h2M13 13h2"/><path d="M10 21v-4h4v4"/>',
     cart: '<circle cx="9" cy="20" r="1.6"/><circle cx="18" cy="20" r="1.6"/><path d="M3 4h2.5l2.4 11.2a1 1 0 0 0 1 .8h8.6a1 1 0 0 0 1-.8L20 8H6.2"/>',
     phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.4"/><path d="M11 18.5h2"/>',
@@ -46,6 +49,7 @@
   const APPS = [
     { id: 'contracts', name: 'Contratos', icon: 'clipboard', tone: 'blue',   phone: true },
     { id: 'shop',      name: 'Loja',      icon: 'cart',      tone: 'teal',   phone: true },
+    { id: 'fleet',     name: 'Frota',     icon: 'convoy',    tone: 'slate',  phone: true },
     { id: 'bank',      name: 'Banco',     icon: 'wallet',    tone: 'green',  phone: true },
     { id: 'garage',    name: 'Garagem',   icon: 'truck',     tone: 'orange' },
     { id: 'company',   name: 'Empresa',   icon: 'building',  tone: 'purple' },
@@ -70,8 +74,8 @@
   };
 
   const ui = {
-    open: false, phone: false, app: null, tab: 'available', shopTab: 'goods',
-    onClose: null, clock: null, toastTimer: null, confirmReset: false,
+    open: false, phone: false, app: null, tab: 'available', shopTab: 'goods', fleetTab: 'trucks',
+    onClose: null, clock: null, tick: null, toastTimer: null, confirmReset: false,
   };
 
   // Apps visíveis: o celular mostra só os que têm phone:true
@@ -179,17 +183,24 @@
   function contractCard(c, lvl, hasMission) {
     const dest = S.DEST[c.to];
     const locked = c.level > lvl;
+    const needConvoy = c.heavy ? c.heavy - 1 : 0;
     let action;
     if (locked) {
       action = '<span class="lock">' + ic('lock') + ' Nível ' + c.level + '</span>';
+    } else if (needConvoy && S.convoyCount() < needConvoy) {
+      action = '<button class="btn sm" data-act="open" data-app="fleet">Montar comboio</button>';
     } else if (S.missingGoods(c).length) {
       action = '<button class="btn sm" data-act="open" data-app="shop">Comprar estoque</button>';
     } else {
       action = '<button class="btn primary sm" data-act="accept" data-id="' + c.id + '"' + (hasMission ? ' disabled' : '') + '>Aceitar</button>';
     }
+    const heavyLine = needConvoy
+      ? '<li>' + ic('truck') + '<span>Exige você + ' + needConvoy + ' no comboio <em class="' + (S.convoyCount() >= needConvoy ? 'need-ok' : 'need-miss') + '">(comboio ' + S.convoyCount() + ')</em></span></li>'
+      : '';
     return (
       '<article class="c-card risk-' + c.risk + (locked ? ' locked' : '') + '">' +
         '<div class="c-top"><span class="tag tag-' + c.risk + '">' + RISK[c.risk] + '</span>' +
+        (c.heavy ? '<span class="tag tag-heavy">' + ic('truck') + ' Carga pesada · ' + c.heavy + ' caminhões</span>' : '') +
         (dest.far ? '<span class="tag tag-far">' + ic('road') + ' Via rodovia</span>' : '<span class="tag tag-near">Na cidade</span>') + '</div>' +
         '<h3>' + esc(c.title) + '</h3>' +
         '<p class="client">' + esc(c.client) + '</p>' +
@@ -197,7 +208,7 @@
           '<li>' + ic('box') + '<span><i style="background:' + c.color + '"></i>' + esc(c.cargo) + '</span></li>' +
           '<li>' + ic('route') + '<span>Zona de Carga → ' + esc(dest.name) + '</span></li>' +
           '<li>' + ic('clock') + '<span>Prazo: ' + fmtTime(c.time) + ' após carregar</span></li>' +
-          goodsLines(c) +
+          heavyLine + goodsLines(c) +
         '</ul>' +
         '<div class="c-foot"><span class="pay">' + S.fmt(c.pay) + '</span>' + action + '</div>' +
       '</article>'
@@ -210,7 +221,7 @@
     const lvl = S.level();
     let h =
       '<div class="app-head"><div><h2>Central de Contratos</h2>' +
-      '<p class="sub">Aceitar um contrato consome mercadorias do estoque. Depois estacione na Zona de Carga, leve a carga ao destino e receba.</p></div>' +
+      '<p class="sub">Aceitar um contrato consome mercadorias do estoque. Cargas pesadas exigem comboio. Depois estacione na Zona de Carga, leve a carga ao destino e receba.</p></div>' +
       '<span class="lvl-pill">' + ic('star') + ' Nível ' + lvl + '</span></div>';
 
     if (m) {
@@ -220,7 +231,7 @@
       h +=
         '<div class="mission-panel">' +
           '<div class="row-between"><b style="font-size:16px">Contrato ativo · ' + esc(c.title) + '</b><span class="pay">' + S.fmt(c.pay) + '</span></div>' +
-          '<div class="w-sub">' + esc(c.client) + ' · ' + esc(c.cargo) + '</div>' +
+          '<div class="w-sub">' + esc(c.client) + ' · ' + esc(c.cargo) + (c.heavy ? ' · comboio de ' + (c.heavy - 1) + ' travado' : '') + '</div>' +
           '<div class="steps">' +
             '<div class="step ' + (picked ? 'done' : 'now') + '"><span class="num">' + (picked ? ic('check') : '1') + '</span><span>Carregar na <b>Zona de Carga</b> (Truck City)</span></div>' +
             '<div class="step ' + (picked ? 'now' : '') + '"><span class="num">2</span><span>Entregar em <b>' + esc(dest.name) + '</b><br><small style="opacity:.7">' + esc(dest.where) + '</small></span></div>' +
@@ -291,12 +302,117 @@
         '<div class="gear-card">' +
           '<span class="tile tone-teal">' + ic('phone') + '</span>' +
           '<div class="info"><b>Celular Móvel</b>' +
-          '<span>Abra Contratos, Loja e Banco de qualquer lugar do mapa, direto do ícone no canto da tela (apenas a pé, fora do caminhão).</span>' +
+          '<span>Abra Contratos, Loja, Frota e Banco de qualquer lugar do mapa, direto do ícone no canto da tela (apenas a pé, fora do caminhão).</span>' +
           '<div class="gear-price">' + S.fmt(price) + '</div></div>' +
           (d.phone
             ? '<span class="lock">' + ic('check') + ' Adquirido</span>'
             : '<button class="btn success" data-act="buy-phone"' + (d.money < price ? ' disabled' : '') + '>Comprar</button>') +
         '</div>';
+    }
+    return h;
+  }
+
+  /* ---------- APP: FROTA ---------- */
+  function truckCard(t, inConvoy) {
+    let status;
+    let bar = '';
+    if (t.job) {
+      const left = Math.max(0, t.job.endsAt - Date.now());
+      const pct = Math.min(100, Math.round((1 - left / (t.job.duration * 1000)) * 100));
+      status = 'Em viagem · ' + esc(t.job.title) + ' · volta em ' + fmtTime(left / 1000);
+      bar = '<div class="meter"><i style="width:' + pct + '%"></i></div>';
+    } else {
+      status = inConvoy ? 'No comboio (seguindo você)' : 'Livre na garagem';
+    }
+    return (
+      '<article class="g-card"><div class="g-head"><b><span class="dot-color" style="background:' + t.color + '"></span>' + esc(t.name) + '</b></div>' +
+      '<div class="g-qty">' + status + '</div>' + bar + '</article>'
+    );
+  }
+
+  function dispatchCard(c, free) {
+    const dest = S.DEST[c.to];
+    const off = free === 0 || S.missingGoods(c).length > 0;
+    return (
+      '<article class="g-card"><div class="g-head"><b>' + esc(c.title) + '</b></div>' +
+      '<div class="g-qty">→ ' + esc(dest.name) + ' · volta em ' + fmtTime(c.time + 30) + '</div>' +
+      '<ul class="c-info">' + goodsLines(c) + '</ul>' +
+      '<div class="g-actions"><span class="pay">' + S.fmt(Math.round(c.pay * S.JOB_CUT)) + '</span>' +
+      '<button class="btn primary sm" data-act="dispatch" data-id="' + c.id + '"' + (off ? ' disabled' : '') + '>Despachar</button></div></article>'
+    );
+  }
+
+  function restockCard(id, free) {
+    const d = S.data;
+    const g = S.GOODS[id];
+    const have = S.stockOf(id);
+    const btn = (n) => {
+      const qty = g.lot * n;
+      const cost = Math.round(g.price * qty * S.RESTOCK_DISCOUNT);
+      const off = free === 0 || d.money < cost || have + S.pendingGoods(id) + qty > g.cap;
+      return '<button class="btn sm primary" data-act="restock" data-id="' + id + '" data-lots="' + n + '"' + (off ? ' disabled' : '') + '>+' + qty + ' · ' + S.fmt(cost) + '</button>';
+    };
+    return (
+      '<article class="g-card"><div class="g-head"><b>' + esc(g.name) + '</b><span class="g-price">estoque ' + have + ' / ' + g.cap + '</span></div>' +
+      '<div class="g-qty">Viagem de ' + fmtTime(45 + 12) + ' a ' + fmtTime(45 + 60) + ' · 30% mais barato que a loja</div>' +
+      '<div class="g-actions">' + btn(1) + btn(5) + '</div></article>'
+    );
+  }
+
+  function renderFleet() {
+    const d = S.data;
+    const n = d.fleet.length;
+    const price = S.nextTruckPrice();
+    const lock = S.convoyLock();
+    const idle = S.idleTrucks().length;
+    const cur = S.convoyCount();
+    const inConvoy = S.convoyFleet().map((t) => t.id);
+
+    let h =
+      '<div class="app-head"><div><h2>Frota</h2>' +
+      '<p class="sub">Monte um comboio para cargas pesadas ou contrate um funcionário para despachar caminhões sozinhos.</p></div>' +
+      '<span class="lvl-pill">' + ic('truck') + ' ' + n + '/' + S.MAX_FLEET + ' caminhões</span></div>' +
+      '<div class="seg-tabs">' +
+        '<button class="seg-tab' + (ui.fleetTab === 'trucks' ? ' active' : '') + '" data-act="fleet-tab" data-tab="trucks">Caminhões</button>' +
+        '<button class="seg-tab' + (ui.fleetTab === 'dispatch' ? ' active' : '') + '" data-act="fleet-tab" data-tab="dispatch">Despacho</button>' +
+      '</div>';
+
+    if (ui.fleetTab === 'trucks') {
+      h +=
+        '<div class="gear-card"><span class="tile tone-orange">' + ic('truck') + '</span>' +
+        '<div class="info"><b>Novo caminhão</b><span>Cada caminhão extra pode seguir você no comboio ou, com o Funcionário Responsável, trabalhar sozinho.</span>' +
+        (price == null ? '' : '<div class="gear-price">' + S.fmt(price) + '</div>') + '</div>' +
+        (price == null
+          ? '<span class="lock">' + ic('check') + ' Frota completa</span>'
+          : '<button class="btn success" data-act="buy-truck"' + (d.money < price ? ' disabled' : '') + '>Comprar</button>') +
+        '</div>' +
+        '<div class="panel-card" style="margin-top:16px"><h3>Comboio (visual)</h3>' +
+        '<p class="w-sub" style="margin:0">Quantos caminhões livres seguem você pela estrada' + (lock ? ' (carga pesada ativa: mínimo ' + lock + ')' : '') + '.</p>' +
+        '<div class="conv-row">' +
+        [0, 1, 2, 3, 4, 5].map((k) =>
+          '<button class="seg-tab' + (k === cur ? ' active' : '') + '" data-act="convoy" data-n="' + k + '"' + (k > idle || k < lock ? ' disabled' : '') + '>' + k + '</button>'
+        ).join('') + '</div></div>' +
+        '<div class="fleet-sec">SEUS CAMINHÕES</div>';
+      h += n
+        ? '<div class="shop-grid">' + d.fleet.map((t) => truckCard(t, inConvoy.indexOf(t.id) !== -1)).join('') + '</div>'
+        : '<div class="empty">Você ainda só tem o seu caminhão. Compre o primeiro acima.</div>';
+    } else if (!d.employee) {
+      const ok = S.level() >= S.EMPLOYEE_LEVEL;
+      h +=
+        '<div class="gear-card"><span class="tile tone-purple">' + ic('user') + '</span>' +
+        '<div class="info"><b>Funcionário Responsável</b>' +
+        '<span>Despacha caminhões livres sozinho: faz entregas dos contratos (você recebe ' + Math.round(S.JOB_CUT * 100) + '%) e busca mercadorias com desconto. A viagem corre em segundo plano, até com o jogo fechado.</span>' +
+        '<div class="gear-price">' + S.fmt(S.EMPLOYEE_PRICE) + '</div>' +
+        '<p class="fleet-note">Exige nível ' + S.EMPLOYEE_LEVEL + ' da transportadora' + (ok ? '.' : ' (você está no nível ' + S.level() + ').') + '</p></div>' +
+        '<button class="btn success" data-act="hire"' + (!ok || d.money < S.EMPLOYEE_PRICE ? ' disabled' : '') + '>Contratar</button></div>';
+    } else {
+      const free = S.dispatchableTrucks().length;
+      const lvl = S.level();
+      h += '<p class="free-count">Caminhões livres para despacho: <b>' + free + '</b>' + (free === 0 ? ' (os do comboio não saem)' : '') + '</p>' +
+        '<div class="fleet-sec">ENTREGAS AUTOMÁTICAS</div><div class="shop-grid">' +
+        S.CONTRACTS.filter((c) => !c.heavy && c.level <= lvl).map((c) => dispatchCard(c, free)).join('') + '</div>' +
+        '<div class="fleet-sec">REPOSIÇÃO DE ESTOQUE</div><div class="shop-grid">' +
+        Object.keys(S.GOODS).map((id) => restockCard(id, free)).join('') + '</div>';
     }
     return h;
   }
@@ -425,9 +541,11 @@
           '<div><span>Saldo atual</span><b>' + S.fmt(d.money) + '</b></div>' +
           '<div><span>Condição do caminhão</span><b>' + Math.round(d.condition) + '%</b></div>' +
           '<div><span>Celular Móvel</span><b>' + (d.phone ? 'Sim' : 'Não') + '</b></div>' +
+          '<div><span>Frota</span><b>' + d.fleet.length + '/' + S.MAX_FLEET + '</b></div>' +
+          '<div><span>Funcionário Responsável</span><b>' + (d.employee ? 'Contratado' : 'Não') + '</b></div>' +
         '</div></div>' +
         '<div class="panel-card danger-zone" style="grid-column:1/-1"><h3>Opções</h3>' +
-          '<p class="w-sub" style="margin:0 0 10px">Reiniciar apaga saldo, estoque, upgrades, pintura, histórico, celular e o contrato ativo. Esta ação não pode ser desfeita.</p>' +
+          '<p class="w-sub" style="margin:0 0 10px">Reiniciar apaga saldo, estoque, frota, upgrades, pintura, histórico, celular e o contrato ativo. Esta ação não pode ser desfeita.</p>' +
           (ui.confirmReset
             ? '<div class="w-row" style="margin-top:0"><button class="btn danger" data-act="reset-yes">Confirmar: apagar tudo</button><button class="btn" data-act="reset-no">Cancelar</button></div>'
             : '<button class="btn danger" data-act="reset">Reiniciar progresso</button>') +
@@ -442,6 +560,7 @@
     let html = '';
     if (ui.app === 'contracts') html = renderContracts();
     else if (ui.app === 'shop') html = renderShop();
+    else if (ui.app === 'fleet') html = renderFleet();
     else if (ui.app === 'bank') html = renderBank();
     else if (ui.app === 'garage') html = renderGarage();
     else if (ui.app === 'company') html = renderCompany();
@@ -487,10 +606,16 @@
       case 'power': close(); break;
       case 'tab': ui.tab = b.dataset.tab; renderApp(); break;
       case 'shop-tab': ui.shopTab = b.dataset.tab; renderApp(); break;
+      case 'fleet-tab': ui.fleetTab = b.dataset.tab; renderApp(); break;
       case 'accept': run(S.acceptContract(b.dataset.id)); break;
       case 'cancel': run(S.cancelMission()); break;
       case 'buy': run(S.buyGoods(b.dataset.id, Number(b.dataset.lots))); break;
       case 'buy-phone': run(S.buyPhone()); break;
+      case 'buy-truck': run(S.buyTruck()); break;
+      case 'convoy': run(S.setConvoy(Number(b.dataset.n))); break;
+      case 'hire': run(S.hireEmployee()); break;
+      case 'dispatch': run(S.dispatchDelivery(b.dataset.id)); break;
+      case 'restock': run(S.dispatchRestock(b.dataset.id, Number(b.dataset.lots))); break;
       case 'repair': run(S.repair()); break;
       case 'upgrade': run(S.buyUpgrade(b.dataset.key)); break;
       case 'paint': run(S.setPaint(b.dataset.color)); break;
@@ -544,6 +669,7 @@
     if (!ui.open) return;
     renderChrome();
     renderWidgets();
+    if (ui.app === 'fleet') renderApp(); // viagem terminou: atualiza a Frota na hora
   });
 
   const phoneBtn = $('#btn-phone');
@@ -557,6 +683,7 @@
     ui.app = null;
     ui.tab = 'available';
     ui.shopTab = 'goods';
+    ui.fleetTab = 'trucks';
     ui.confirmReset = false;
     el.root.classList.toggle('phone-mode', ui.phone);
     el.root.classList.remove('hidden');
@@ -568,6 +695,9 @@
     tickClock();
     clearInterval(ui.clock);
     ui.clock = setInterval(tickClock, 15000);
+    // com o app Frota aberto, atualiza as barras de viagem a cada segundo
+    clearInterval(ui.tick);
+    ui.tick = setInterval(() => { if (ui.open && ui.app === 'fleet') renderApp(); }, 1000);
   }
 
   function openPhone() {
@@ -579,6 +709,7 @@
     if (!ui.open) return;
     ui.open = false;
     clearInterval(ui.clock);
+    clearInterval(ui.tick);
     el.root.classList.add('hidden');
     el.root.classList.remove('phone-mode');
     ui.phone = false;
