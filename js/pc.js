@@ -1,5 +1,9 @@
 /* ============================================================
-   TRUCK CITY - pc.js  (Fase 3) - TruckOS
+   TRUCK CITY - pc.js  (Fase 4B) - TruckOS
+   Computador da transportadora E modo "celular" (Celular Móvel):
+   área de trabalho, janelas e apps (Contratos, Loja, Banco, Garagem, Empresa).
+   Uso: TC.pc.open(callbackAoFechar)  -> computador do escritório
+        TC.pc.openPhone()             -> celular (só se já foi comprado)
    ============================================================ */
 (function () {
   'use strict';
@@ -12,11 +16,14 @@
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 
+  /* ---------- ÍCONES (SVG de traço, 24x24) ---------- */
   const ICON = {
     clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5"/><path d="M9 13l2.2 2.2L15.5 11"/>',
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><circle cx="16.5" cy="14.5" r="1.3"/>',
     truck: '<path d="M2 6.5h11V16H2z"/><path d="M13 9.5h4l3 3.2V16h-7z"/><circle cx="6.5" cy="17.5" r="2"/><circle cx="16.5" cy="17.5" r="2"/>',
     building: '<path d="M4 21V6l8-3 8 3v15"/><path d="M9 9h2M13 9h2M9 13h2M13 13h2"/><path d="M10 21v-4h4v4"/>',
+    cart: '<circle cx="9" cy="20" r="1.6"/><circle cx="18" cy="20" r="1.6"/><path d="M3 4h2.5l2.4 11.2a1 1 0 0 0 1 .8h8.6a1 1 0 0 0 1-.8L20 8H6.2"/>',
+    phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.4"/><path d="M11 18.5h2"/>',
     star: '<path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.8l-5.4 2.9 1.1-6.1L3.2 9.4l6.1-.8z"/>',
     road: '<path d="M8 3L5 21M16 3l3 18M12 4v3M12 10.5v3M12 17v3"/>',
     box: '<path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5L12 12l9-4.5M12 12v9"/>',
@@ -35,9 +42,11 @@
   const ic = (name, cls) =>
     '<svg class="ic ' + (cls || '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON[name] + '</svg>';
 
+  // phone: true = o app também existe no Celular Móvel
   const APPS = [
-    { id: 'contracts', name: 'Contratos', icon: 'clipboard', tone: 'blue' },
-    { id: 'bank',      name: 'Banco',     icon: 'wallet',    tone: 'green' },
+    { id: 'contracts', name: 'Contratos', icon: 'clipboard', tone: 'blue',   phone: true },
+    { id: 'shop',      name: 'Loja',      icon: 'cart',      tone: 'teal',   phone: true },
+    { id: 'bank',      name: 'Banco',     icon: 'wallet',    tone: 'green',  phone: true },
     { id: 'garage',    name: 'Garagem',   icon: 'truck',     tone: 'orange' },
     { id: 'company',   name: 'Empresa',   icon: 'building',  tone: 'purple' },
   ];
@@ -60,8 +69,15 @@
     toast: $('#os-toast'),
   };
 
-  const ui = { open: false, app: null, tab: 'available', onClose: null, clock: null, toastTimer: null, confirmReset: false };
+  const ui = {
+    open: false, phone: false, app: null, tab: 'available', shopTab: 'goods',
+    onClose: null, clock: null, toastTimer: null, confirmReset: false,
+  };
 
+  // Apps visíveis: o celular mostra só os que têm phone:true
+  const visibleApps = () => APPS.filter((a) => !ui.phone || a.phone);
+
+  /* ---------- UTILITÁRIOS ---------- */
   function fmtTime(sec) {
     sec = Math.max(0, Math.round(sec));
     const m = Math.floor(sec / 60);
@@ -86,13 +102,14 @@
     el.clock.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
 
+  /* ---------- CASCA (barra superior, ícones, dock, widgets) ---------- */
   function renderChrome() {
     el.company.textContent = S.data.company;
     el.money.textContent = S.fmt(S.data.money);
   }
 
   function renderIcons() {
-    el.icons.innerHTML = APPS.map((a) =>
+    el.icons.innerHTML = visibleApps().map((a) =>
       '<button class="desk-icon" data-act="open" data-app="' + a.id + '">' +
         '<span class="tile tone-' + a.tone + '">' + ic(a.icon) + '</span>' +
         '<span>' + a.name + '</span>' +
@@ -101,7 +118,7 @@
   }
 
   function renderDock() {
-    el.dockApps.innerHTML = APPS.map((a) =>
+    el.dockApps.innerHTML = visibleApps().map((a) =>
       '<button class="dock-btn' + (ui.app === a.id ? ' active' : '') + '" data-act="open" data-app="' + a.id + '" title="' + a.name + '">' +
         '<span class="tile tone-' + a.tone + '">' + ic(a.icon) + '</span>' +
         '<span class="dlbl">' + a.name + '</span>' +
@@ -114,6 +131,8 @@
     const m = d.mission;
     const lvl = S.level();
     const lp = S.levelProgress();
+    const ids = Object.keys(S.GOODS);
+    const have = ids.filter((id) => S.stockOf(id) > 0).length;
 
     let missionHtml;
     if (m) {
@@ -135,31 +154,52 @@
         '<div class="w-big">' + S.fmt(d.money) + '</div>' +
         '<div class="w-sub">' + d.deliveries + ' entregas · ' + S.fmt(d.earned) + ' ganhos</div></div>' +
       '<div class="w-card"><div class="w-label">' + ic('clipboard') + ' MISSÃO ATUAL</div>' + missionHtml + '</div>' +
+      '<div class="w-card"><div class="w-label">' + ic('box') + ' ESTOQUE</div>' +
+        '<h4>' + have + ' de ' + ids.length + ' mercadorias em estoque</h4>' +
+        '<div class="w-sub">Cada contrato consome mercadorias ao ser aceito.</div>' +
+        '<div class="w-row"><button class="btn sm primary" data-act="open" data-app="shop">Abrir Loja</button></div></div>' +
       '<div class="w-card"><div class="w-label">' + ic('star') + ' NÍVEL DA TRANSPORTADORA</div>' +
         '<div class="w-big" style="color:#ffd978">Nível ' + lvl + '</div>' +
         '<div class="meter"><i style="width:' + Math.round(lp.pct * 100) + '%"></i></div>' +
         '<div class="w-sub" style="margin-top:6px">' + (lp.max ? 'Nível máximo!' : lp.done + '/' + lp.need + ' entregas para o próximo nível') + '</div></div>';
   }
 
+  /* ---------- APP: CONTRATOS ---------- */
+  // Linhas das mercadorias que o contrato consome (verde = tem, vermelho = falta)
+  function goodsLines(c) {
+    const need = S.goodsFor(c);
+    return Object.keys(need).map((id) => {
+      const g = S.GOODS[id];
+      const have = S.stockOf(id);
+      return '<li>' + ic('box') + '<span>Consome ' + esc(g.name) + ' ×' + need[id] +
+        ' <em class="' + (have >= need[id] ? 'need-ok' : 'need-miss') + '">(estoque ' + have + ')</em></span></li>';
+    }).join('');
+  }
+
   function contractCard(c, lvl, hasMission) {
     const dest = S.DEST[c.to];
     const locked = c.level > lvl;
+    let action;
+    if (locked) {
+      action = '<span class="lock">' + ic('lock') + ' Nível ' + c.level + '</span>';
+    } else if (S.missingGoods(c).length) {
+      action = '<button class="btn sm" data-act="open" data-app="shop">Comprar estoque</button>';
+    } else {
+      action = '<button class="btn primary sm" data-act="accept" data-id="' + c.id + '"' + (hasMission ? ' disabled' : '') + '>Aceitar</button>';
+    }
     return (
       '<article class="c-card risk-' + c.risk + (locked ? ' locked' : '') + '">' +
         '<div class="c-top"><span class="tag tag-' + c.risk + '">' + RISK[c.risk] + '</span>' +
-        (dest.far ? '<span class="tag tag-far">' + ic('road') + ' Via BR-116</span>' : '<span class="tag tag-near">Na cidade</span>') + '</div>' +
+        (dest.far ? '<span class="tag tag-far">' + ic('road') + ' Via rodovia</span>' : '<span class="tag tag-near">Na cidade</span>') + '</div>' +
         '<h3>' + esc(c.title) + '</h3>' +
         '<p class="client">' + esc(c.client) + '</p>' +
         '<ul class="c-info">' +
           '<li>' + ic('box') + '<span><i style="background:' + c.color + '"></i>' + esc(c.cargo) + '</span></li>' +
           '<li>' + ic('route') + '<span>Zona de Carga → ' + esc(dest.name) + '</span></li>' +
           '<li>' + ic('clock') + '<span>Prazo: ' + fmtTime(c.time) + ' após carregar</span></li>' +
+          goodsLines(c) +
         '</ul>' +
-        '<div class="c-foot"><span class="pay">' + S.fmt(c.pay) + '</span>' +
-        (locked
-          ? '<span class="lock">' + ic('lock') + ' Nível ' + c.level + '</span>'
-          : '<button class="btn primary sm" data-act="accept" data-id="' + c.id + '"' + (hasMission ? ' disabled' : '') + '>Aceitar</button>') +
-        '</div>' +
+        '<div class="c-foot"><span class="pay">' + S.fmt(c.pay) + '</span>' + action + '</div>' +
       '</article>'
     );
   }
@@ -170,7 +210,7 @@
     const lvl = S.level();
     let h =
       '<div class="app-head"><div><h2>Central de Contratos</h2>' +
-      '<p class="sub">Aceite um contrato, estacione na Zona de Carga, leve a carga ao destino e receba. Entregas rápidas rendem bônus.</p></div>' +
+      '<p class="sub">Aceitar um contrato consome mercadorias do estoque. Depois estacione na Zona de Carga, leve a carga ao destino e receba.</p></div>' +
       '<span class="lvl-pill">' + ic('star') + ' Nível ' + lvl + '</span></div>';
 
     if (m) {
@@ -207,6 +247,61 @@
     return h;
   }
 
+  /* ---------- APP: LOJA E ESTOQUE ---------- */
+  function goodsCard(id) {
+    const d = S.data;
+    const g = S.GOODS[id];
+    const qty = S.stockOf(id);
+    const pct = qty / g.cap;
+    const cls = pct < 0.15 ? 'low' : pct < 0.4 ? 'mid' : 'ok';
+
+    const buyBtn = (n) => {
+      const amount = g.lot * n;
+      const cost = g.price * amount;
+      const off = d.money < cost || qty + amount > g.cap;
+      return '<button class="btn sm primary" data-act="buy" data-id="' + id + '" data-lots="' + n + '"' + (off ? ' disabled' : '') + '>+' + amount + ' · ' + S.fmt(cost) + '</button>';
+    };
+
+    return (
+      '<article class="g-card">' +
+        '<div class="g-head"><b>' + esc(g.name) + '</b><span class="g-price">' + S.fmt(g.price) + ' / ' + esc(g.unit) + '</span></div>' +
+        '<div class="g-qty">Em estoque: <b>' + qty + '</b> / ' + g.cap + ' ' + esc(g.unit) + '</div>' +
+        '<div class="meter cond"><i class="' + cls + '" style="width:' + Math.round(pct * 100) + '%"></i></div>' +
+        '<div class="g-actions">' + buyBtn(1) + buyBtn(5) + '</div>' +
+      '</article>'
+    );
+  }
+
+  function renderShop() {
+    const d = S.data;
+    let h =
+      '<div class="app-head"><div><h2>Loja &amp; Estoque</h2>' +
+      '<p class="sub">Reponha as mercadorias que os contratos consomem e invista em equipamentos.</p></div>' +
+      '<span class="chip" style="color:#7dff9a">' + S.fmt(d.money) + '</span></div>' +
+      '<div class="seg-tabs">' +
+        '<button class="seg-tab' + (ui.shopTab === 'goods' ? ' active' : '') + '" data-act="shop-tab" data-tab="goods">Mercadorias</button>' +
+        '<button class="seg-tab' + (ui.shopTab === 'gear' ? ' active' : '') + '" data-act="shop-tab" data-tab="gear">Equipamentos</button>' +
+      '</div>';
+
+    if (ui.shopTab === 'goods') {
+      h += '<div class="shop-grid">' + Object.keys(S.GOODS).map(goodsCard).join('') + '</div>';
+    } else {
+      const price = S.PHONE_PRICE;
+      h +=
+        '<div class="gear-card">' +
+          '<span class="tile tone-teal">' + ic('phone') + '</span>' +
+          '<div class="info"><b>Celular Móvel</b>' +
+          '<span>Abra Contratos, Loja e Banco de qualquer lugar do mapa, direto do ícone no canto da tela (apenas a pé, fora do caminhão).</span>' +
+          '<div class="gear-price">' + S.fmt(price) + '</div></div>' +
+          (d.phone
+            ? '<span class="lock">' + ic('check') + ' Adquirido</span>'
+            : '<button class="btn success" data-act="buy-phone"' + (d.money < price ? ' disabled' : '') + '>Comprar</button>') +
+        '</div>';
+    }
+    return h;
+  }
+
+  /* ---------- APP: BANCO ---------- */
   function renderBank() {
     const d = S.data;
     const avg = d.deliveries ? Math.round(d.earned / d.deliveries) : 0;
@@ -234,6 +329,7 @@
     return h + '</div>';
   }
 
+  /* ---------- APP: GARAGEM ---------- */
   function darken(hex, k) {
     const n = parseInt(hex.slice(1), 16);
     const r = Math.round(((n >> 16) & 255) * k);
@@ -306,6 +402,7 @@
       '<div class="garage-grid"><div>' + left + '</div><div>' + right + '</div></div>';
   }
 
+  /* ---------- APP: EMPRESA ---------- */
   function renderCompany() {
     const d = S.data;
     const lvl = S.level();
@@ -327,9 +424,10 @@
           '<div><span>Despesas</span><b>' + S.fmt(d.spent) + '</b></div>' +
           '<div><span>Saldo atual</span><b>' + S.fmt(d.money) + '</b></div>' +
           '<div><span>Condição do caminhão</span><b>' + Math.round(d.condition) + '%</b></div>' +
+          '<div><span>Celular Móvel</span><b>' + (d.phone ? 'Sim' : 'Não') + '</b></div>' +
         '</div></div>' +
         '<div class="panel-card danger-zone" style="grid-column:1/-1"><h3>Opções</h3>' +
-          '<p class="w-sub" style="margin:0 0 10px">Reiniciar apaga saldo, upgrades, pintura, histórico e o contrato ativo. Esta ação não pode ser desfeita.</p>' +
+          '<p class="w-sub" style="margin:0 0 10px">Reiniciar apaga saldo, estoque, upgrades, pintura, histórico, celular e o contrato ativo. Esta ação não pode ser desfeita.</p>' +
           (ui.confirmReset
             ? '<div class="w-row" style="margin-top:0"><button class="btn danger" data-act="reset-yes">Confirmar: apagar tudo</button><button class="btn" data-act="reset-no">Cancelar</button></div>'
             : '<button class="btn danger" data-act="reset">Reiniciar progresso</button>') +
@@ -338,27 +436,32 @@
     );
   }
 
+  /* ---------- JANELA ---------- */
   function renderApp() {
     if (!ui.app) return;
     let html = '';
     if (ui.app === 'contracts') html = renderContracts();
+    else if (ui.app === 'shop') html = renderShop();
     else if (ui.app === 'bank') html = renderBank();
     else if (ui.app === 'garage') html = renderGarage();
     else if (ui.app === 'company') html = renderCompany();
+    // preserva a rolagem ao redesenhar (ex.: depois de comprar)
+    const top = el.winBody.scrollTop;
     el.winBody.innerHTML = html;
+    el.winBody.scrollTop = top;
   }
 
   function openApp(id) {
     const app = appById(id);
-    if (!app) return;
+    if (!app || (ui.phone && !app.phone)) return;
     ui.app = id;
     ui.confirmReset = false;
     el.win.classList.remove('hidden');
     el.winIco.innerHTML = '<span class="tile tone-' + app.tone + '">' + ic(app.icon) + '</span>';
     el.winTitle.textContent = app.name;
+    el.winBody.scrollTop = 0;
     renderApp();
     renderDock();
-    el.winBody.scrollTop = 0;
   }
 
   function closeApp() {
@@ -369,46 +472,31 @@
     renderWidgets();
   }
 
+  /* ---------- EVENTOS ---------- */
+  function run(r) {
+    toast(r.msg, r.ok ? 'ok' : 'err');
+    renderApp();
+  }
+
   el.root.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
     if (!b || b.disabled) return;
-    const act = b.dataset.act;
-    let r;
-    switch (act) {
+    switch (b.dataset.act) {
       case 'open': openApp(b.dataset.app); break;
       case 'desktop': closeApp(); break;
       case 'power': close(); break;
       case 'tab': ui.tab = b.dataset.tab; renderApp(); break;
-      case 'accept':
-        r = S.acceptContract(b.dataset.id);
-        toast(r.msg, r.ok ? 'ok' : 'err');
-        renderApp();
-        break;
-      case 'cancel':
-        r = S.cancelMission();
-        toast(r.msg, r.ok ? 'ok' : 'err');
-        renderApp();
-        break;
-      case 'repair':
-        r = S.repair();
-        toast(r.msg, r.ok ? 'ok' : 'err');
-        renderApp();
-        break;
-      case 'upgrade':
-        r = S.buyUpgrade(b.dataset.key);
-        toast(r.msg, r.ok ? 'ok' : 'err');
-        renderApp();
-        break;
-      case 'paint':
-        r = S.setPaint(b.dataset.color);
-        toast(r.msg, r.ok ? 'ok' : 'err');
-        renderApp();
-        break;
+      case 'shop-tab': ui.shopTab = b.dataset.tab; renderApp(); break;
+      case 'accept': run(S.acceptContract(b.dataset.id)); break;
+      case 'cancel': run(S.cancelMission()); break;
+      case 'buy': run(S.buyGoods(b.dataset.id, Number(b.dataset.lots))); break;
+      case 'buy-phone': run(S.buyPhone()); break;
+      case 'repair': run(S.repair()); break;
+      case 'upgrade': run(S.buyUpgrade(b.dataset.key)); break;
+      case 'paint': run(S.setPaint(b.dataset.color)); break;
       case 'rename': {
         const input = $('#co-name');
-        r = S.rename(input ? input.value : '');
-        toast(r.msg, r.ok ? 'ok' : 'err');
-        renderApp();
+        run(S.rename(input ? input.value : ''));
         break;
       }
       case 'reset': ui.confirmReset = true; renderApp(); break;
@@ -423,32 +511,54 @@
     }
   });
 
+  // Enter no campo de nome salva
   el.root.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target && e.target.id === 'co-name') {
-      const r = S.rename(e.target.value);
-      toast(r.msg, r.ok ? 'ok' : 'err');
-      renderApp();
+      run(S.rename(e.target.value));
     }
   });
 
+  // Esc: fecha a janela; sem janela, desliga o computador/celular
   document.addEventListener('keydown', (e) => {
     if (!ui.open || e.key !== 'Escape') return;
     if (ui.app) closeApp();
     else close();
   });
 
+  // Com o celular aberto, as teclas do jogo (WASD, E, espaço) não chegam ao Phaser.
+  // (capture = roda antes do Phaser; Esc passa para poder fechar)
+  window.addEventListener('keydown', (e) => {
+    if (ui.open && ui.phone && e.key !== 'Escape') e.stopImmediatePropagation();
+  }, true);
+
+  /* ---------- CELULAR MÓVEL ---------- */
+  // O ícone só aparece (CSS) com body.phone-owned e o jogador fora do caminhão.
+  function syncPhoneFlag() {
+    document.body.classList.toggle('phone-owned', !!S.data.phone);
+  }
+  syncPhoneFlag();
+
+  // Atualiza o celular/barra/widgets quando o estado muda
   S.subscribe(() => {
+    syncPhoneFlag();
     if (!ui.open) return;
     renderChrome();
     renderWidgets();
   });
 
-  function open(onClose) {
+  const phoneBtn = $('#btn-phone');
+  if (phoneBtn) phoneBtn.addEventListener('click', () => openPhone());
+
+  /* ---------- ABRIR / FECHAR ---------- */
+  function open(onClose, phone) {
     ui.open = true;
+    ui.phone = !!phone;
     ui.onClose = onClose || null;
     ui.app = null;
     ui.tab = 'available';
+    ui.shopTab = 'goods';
     ui.confirmReset = false;
+    el.root.classList.toggle('phone-mode', ui.phone);
     el.root.classList.remove('hidden');
     el.win.classList.add('hidden');
     renderChrome();
@@ -460,16 +570,23 @@
     ui.clock = setInterval(tickClock, 15000);
   }
 
+  function openPhone() {
+    if (ui.open || !S.data.phone) return;
+    open(null, true);
+  }
+
   function close() {
     if (!ui.open) return;
     ui.open = false;
     clearInterval(ui.clock);
     el.root.classList.add('hidden');
+    el.root.classList.remove('phone-mode');
+    ui.phone = false;
     S.save();
     const cb = ui.onClose;
     ui.onClose = null;
     if (cb) cb();
   }
 
-  TC.pc = { open: open, close: close };
+  TC.pc = { open: open, openPhone: openPhone, close: close };
 })();
