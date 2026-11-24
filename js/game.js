@@ -1,5 +1,12 @@
 /* ============================================================
-   TRUCK CITY - game.js  (Fase 3 Original Estável)
+   TRUCK CITY - game.js  (Fase 4A)
+   Mantém a lógica das Fases 1 a 3 (física Ackermann, controles, tap-to-move,
+   escritório, missões, economia, botão contextual fixo) e adiciona:
+   - cidade com saídas em CRUZ (norte, sul, oeste, leste)
+   - BR-116 Norte até a Nova Cidade (zona de construção)
+   - Estrada da Pedreira (oeste) e Estrada da Serraria (leste)
+   - tráfego de carros NPC nas BRs (traffic.js), com colisão e dano
+   Convenção: heading 0 = apontando para a direita (+x), y cresce para baixo.
    ============================================================ */
 (function () {
   'use strict';
@@ -7,17 +14,23 @@
   const TC = window.TC;
   const CFG = TC.cfg;
   const ART = TC.art;
+  const ART2 = TC.art2;
   const STORE = TC.store;
 
+  /* ================= CONFIGURAÇÃO (ajuste aqui) ================= */
+
+  // Desligue aqui se a colisão atrapalhar algum teste (não afeta a física)
   const COLLISIONS = { truck: true, player: true };
 
   const TRUCK = {
+    // Geometria (pixels) - o centro do caminhão é a origem local
     halfL: 70,
     halfW: 27,
     wheelbase: 90,
     rearToCenter: 45,
     door: { x: 40, y: -27 },
 
+    // Dinâmica (pixels e segundos) - os upgrades multiplicam estes valores
     maxFwd: 280,
     maxRev: 90,
     accel: 110,
@@ -26,6 +39,7 @@
     roll: 60,
     drag: 0.2,
 
+    // Direção
     steerLow: 0.62,
     steerHigh: 0.22,
     steerRate: 1.9,
@@ -38,34 +52,95 @@
 
   const PLAYER = { radius: 11, speed: 150, enterDist: 70 };
 
-  const DWELL_TIME = 2;
-  const ZONE_TOL = 10;
+  const DWELL_TIME = 2;   // segundos parado na zona para carregar/descarregar
+  const ZONE_TOL = 10;    // tolerância (px) ao estacionar na zona
 
-  const SEGMENTS = {
-    city:     { id: 'city',     name: 'TRUCK CITY',          sub: 'Centro da cidade',                      ox: 0,    oy: 0, w: CFG.city.w,     h: CFG.city.h,     padX: 0,   padY: 0 },
-    br:       { id: 'br',       name: 'BR-116',              sub: 'Rodovia · sentido Distrito Industrial', ox: 4000, oy: 0, w: CFG.br.w,       h: CFG.br.h,       padX: 800, padY: 0 },
-    district: { id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística',                        ox: 8000, oy: 0, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400 },
-  };
-
-  const PORTALS = [
-    { seg: 'city',     edge: 'S', min: 900,  max: 1100, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
-    { seg: 'city',     edge: 'S', min: 1600, max: 1760, to: 'br',       arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
-    { seg: 'br',       edge: 'N', min: 344,  max: 856,  to: 'city',     arrive: { x: 1050, y: 1830, axis: 'x' }, spread: 40 },
-    { seg: 'br',       edge: 'S', min: 344,  max: 856,  to: 'district', arrive: { x: 750,  y: 170,  axis: 'x' }, spread: 40 },
-    { seg: 'district', edge: 'N', min: 700,  max: 900,  to: 'br',       arrive: { x: 696,  y: 4630, axis: 'x' }, spread: 50 },
+  // Faixas da BR (x local): oeste = sentido sul (dir +1), leste = sentido norte (dir -1)
+  const LANES = [
+    { x: 456, dir: 1 }, { x: 552, dir: 1 },
+    { x: 648, dir: -1 }, { x: 744, dir: -1 },
   ];
 
+  /* ----- Segmentos do mundo (ficam em regiões distantes da mesma cena) ----- */
+  const SEGMENTS = {
+    city: {
+      id: 'city', name: 'TRUCK CITY', sub: 'Centro da cidade',
+      ox: 0, oy: 0, w: CFG.city.w, h: CFG.city.h, padX: 0, padY: 0,
+      dead: 'Fim da via. Saídas: BR-116 (norte e sul), Pedreira (oeste) e Serraria (leste).',
+    },
+    br: {
+      id: 'br', name: 'BR-116 SUL', sub: 'Rodovia · sentido Distrito Industrial',
+      ox: 4000, oy: 0, w: CFG.br.w, h: CFG.br.h, padX: 800, padY: 0,
+      traffic: LANES, dead: 'Fim da pista.',
+    },
+    district: {
+      id: 'district', name: 'DISTRITO INDUSTRIAL', sub: 'Zona logística',
+      ox: 8000, oy: 0, w: CFG.district.w, h: CFG.district.h, padX: 600, padY: 400,
+      dead: 'Fim do pátio. A saída para a BR-116 fica ao norte.',
+    },
+    brn: {
+      id: 'brn', name: 'BR-116 NORTE', sub: 'Rodovia · sentido Nova Cidade',
+      ox: 12000, oy: 0, w: CFG.br.w, h: CFG.br.h, padX: 800, padY: 0,
+      traffic: LANES, dead: 'Fim da pista.',
+    },
+    newcity: {
+      id: 'newcity', name: 'NOVA CIDADE', sub: 'Zona de construção',
+      ox: 16000, oy: 0, w: 1600, h: 1600, padX: 600, padY: 400,
+      dead: 'Fim do canteiro. A saída para a BR-116 fica ao sul.',
+    },
+    quarry: {
+      id: 'quarry', name: 'ESTRADA DA PEDREIRA', sub: 'Estrada rural · sentido oeste',
+      ox: 20000, oy: 0, w: 2400, h: 800, padX: 500, padY: 300,
+      dead: 'Fim da estrada. A volta para a cidade fica a leste.',
+    },
+    sawmill: {
+      id: 'sawmill', name: 'ESTRADA DA SERRARIA', sub: 'Estrada rural · sentido leste',
+      ox: 24000, oy: 0, w: 2400, h: 800, padX: 500, padY: 300,
+      dead: 'Fim da estrada. A volta para a cidade fica a oeste.',
+    },
+  };
+
+  /* ----- Portais de teleporte (coordenadas LOCAIS do segmento) -----
+     edge: borda do portal (N/S/E/W); min..max: trecho da borda (a rua);
+     arrive: chegada no segmento destino (axis = eixo da posição lateral preservada);
+     spread: quanto da posição lateral é preservada. */
+  const PORTALS = [
+    // cidade (cruz): sul, norte, oeste, leste
+    { seg: 'city', edge: 'S', min: 900,  max: 1100, to: 'br',      arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
+    { seg: 'city', edge: 'S', min: 1600, max: 1760, to: 'br',      arrive: { x: 504,  y: 170,  axis: 'x' }, spread: 50 },
+    { seg: 'city', edge: 'N', min: 900,  max: 1100, to: 'brn',     arrive: { x: 696,  y: 4630, axis: 'x' }, spread: 40 },
+    { seg: 'city', edge: 'N', min: 1600, max: 1760, to: 'brn',     arrive: { x: 696,  y: 4630, axis: 'x' }, spread: 40 },
+    { seg: 'city', edge: 'W', min: 900,  max: 1100, to: 'quarry',  arrive: { x: 2230, y: 350,  axis: 'y' }, spread: 30 },
+    { seg: 'city', edge: 'E', min: 900,  max: 1100, to: 'sawmill', arrive: { x: 170,  y: 450,  axis: 'y' }, spread: 30 },
+    // BR-116 Sul <-> Distrito Industrial
+    { seg: 'br',       edge: 'N', min: 344, max: 856, to: 'city',     arrive: { x: 1050, y: 1830, axis: 'x' }, spread: 40 },
+    { seg: 'br',       edge: 'S', min: 344, max: 856, to: 'district', arrive: { x: 750,  y: 170,  axis: 'x' }, spread: 40 },
+    { seg: 'district', edge: 'N', min: 700, max: 900, to: 'br',       arrive: { x: 696,  y: 4630, axis: 'x' }, spread: 50 },
+    // BR-116 Norte <-> Nova Cidade
+    { seg: 'brn',     edge: 'S', min: 344, max: 856, to: 'city',    arrive: { x: 950, y: 170,  axis: 'x' }, spread: 40 },
+    { seg: 'brn',     edge: 'N', min: 344, max: 856, to: 'newcity', arrive: { x: 850, y: 1430, axis: 'x' }, spread: 40 },
+    { seg: 'newcity', edge: 'S', min: 700, max: 900, to: 'brn',     arrive: { x: 504, y: 170,  axis: 'x' }, spread: 50 },
+    // estradas rurais -> cidade
+    { seg: 'quarry',  edge: 'E', min: 300, max: 500, to: 'city', arrive: { x: 170,  y: 1030, axis: 'y' }, spread: 30 },
+    { seg: 'sawmill', edge: 'W', min: 300, max: 500, to: 'city', arrive: { x: 1830, y: 970,  axis: 'y' }, spread: 30 },
+  ];
+
+  /* ----- Zonas de carga/entrega (coordenadas absolutas do mundo) ----- */
   const ZONES = {
     cargo:     { seg: 'city',     x: 1180,                         y: 1110, w: 300, h: 170, color: 0xffd400, label: 'ZONA DE CARGA' },
     work:      { seg: 'city',     x: 180,                          y: 720,  w: 300, h: 170, color: 0x2f7df6, label: 'ZONA DE OBRA' },
     warehouse: { seg: 'district', x: SEGMENTS.district.ox + 200,   y: 720,  w: 300, h: 170, color: 0xff8a3d, label: 'ARMAZÉM CENTRAL' },
     port:      { seg: 'district', x: SEGMENTS.district.ox + 1000,  y: 720,  w: 300, h: 170, color: 0x1abc9c, label: 'PORTO SECO' },
+    build:     { seg: 'newcity',  x: SEGMENTS.newcity.ox + 980,    y: 520,  w: 300, h: 170, color: 0xff5a5f, label: 'ZONA DE CONSTRUÇÃO' },
+    quarry:    { seg: 'quarry',   x: SEGMENTS.quarry.ox + 200,     y: 520,  w: 300, h: 170, color: 0x9b59b6, label: 'PEDREIRA' },
+    sawmill:   { seg: 'sawmill',  x: SEGMENTS.sawmill.ox + 1900,   y: 520,  w: 300, h: 170, color: 0x2ecc71, label: 'SERRARIA' },
   };
   const ZONE_KEYS = Object.keys(ZONES);
 
+  /* ----- Escritório e sala interna ----- */
   const OFFICE = CFG.office;
-  const OFFICE_DOOR = { x: 1350, y: 792, r: 72 };
-  const OFFICE_EXIT = { x: 1350, y: 812 };
+  const OFFICE_DOOR = { x: 1350, y: 792, r: 72 };   // ponto de interação em frente à porta
+  const OFFICE_EXIT = { x: 1350, y: 812 };           // onde o jogador aparece ao sair
 
   const ROOM = CFG.room;
   const ROOM_WALK = { x0: ROOM.x + 26, y0: ROOM.y + 100, x1: ROOM.x + ROOM.w - 26, y1: ROOM.y + ROOM.h - 26 };
@@ -73,20 +148,23 @@
   const ROOM_EXIT = { x: ROOM.x + 400, y: ROOM.y + 515, r: 64 };
   const ROOM_PC = { x: ROOM.x + 570, y: ROOM.y + 222, r: 76 };
 
+  // (a árvore que ficava sobre a rua de saída leste foi removida)
   const TREES = [
     [120, 120], [310, 80], [520, 150], [730, 100], [210, 205],
     [110, 570], [300, 620], [520, 560], [720, 640], [640, 790], [90, 790],
     [1210, 100], [1370, 70], [1500, 160], [1290, 200], [1190, 220],
     [1200, 1400], [1420, 1480], [1280, 1650], [1500, 1780], [1180, 1880], [1380, 1900],
     [150, 1280], [400, 1400], [700, 1320], [260, 1650], [520, 1850], [800, 1600], [100, 1900], [460, 1940],
-    [1880, 180], [1920, 640], [1860, 1000], [1900, 1300], [1850, 1700], [1930, 1900],
+    [1880, 180], [1920, 640], [1900, 1300], [1850, 1700], [1930, 1900],
     [1170, 835], [1530, 835],
   ];
 
+  /* ================= HELPERS ================= */
   const clamp = Phaser.Math.Clamp;
   const lerp = (a, b, t) => a + (b - a) * t;
   const approach = (v, target, step) => (v < target ? Math.min(v + step, target) : Math.max(v - step, target));
 
+  // Converte um ponto local do caminhão para coordenadas do mundo
   function toWorld(t, lx, ly) {
     const cos = Math.cos(t.heading);
     const sin = Math.sin(t.heading);
@@ -100,12 +178,14 @@
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  // 4 px = 1 m (só para exibição)
   function fmtDist(px) {
     const m = px / 4;
     if (m >= 1000) return (m / 1000).toFixed(1).replace('.', ',') + ' km';
     return Math.max(10, Math.round(m / 10) * 10) + ' m';
   }
 
+  // Ponto central da borda de um portal (em coordenadas do mundo)
   function portalPoint(p) {
     const s = SEGMENTS[p.seg];
     const mid = (p.min + p.max) / 2;
@@ -115,6 +195,7 @@
     return { x: s.ox, y: s.oy + mid };
   }
 
+  // Próximo segmento no caminho de "from" até "to" (busca em largura)
   function nextHop(from, to) {
     if (from === to) return null;
     const queue = [[from]];
@@ -135,6 +216,7 @@
     return null;
   }
 
+  /* ================= CENA PRINCIPAL ================= */
   class WorldScene extends Phaser.Scene {
     constructor() {
       super('World');
@@ -142,17 +224,17 @@
 
     create() {
       this.seg = SEGMENTS.city;
-      this.state = 'driving';
-      this.indoor = false;
-      this.uiOpen = false;
-      this.busy = false;
-      this.teleporting = false;
+      this.state = 'driving';   // 'driving' | 'foot'
+      this.indoor = false;      // a pé dentro do escritório?
+      this.uiOpen = false;      // computador aberto?
+      this.busy = false;        // fade de entrada/saída do prédio?
+      this.teleporting = false; // fade de teleporte entre áreas?
       this.target = null;
       this.stuckTime = 0;
       this.interaction = null;
       this.zoneInside = {};
       this.zoneGfx = {};
-      this.solids = { city: [], br: [], district: [] };
+      this.solids = { city: [], br: [], district: [], brn: [], newcity: [], quarry: [], sawmill: [] };
       this.inSolids = [];
       this.portalCooldown = 0;
       this.noticeCooldown = 0;
@@ -161,12 +243,35 @@
       this.paintKey = null;
       this.cargoKey = null;
       this.beaconKey = undefined;
+      // obstáculos móveis para os carros NPC frearem (caminhão e, a pé, o jogador)
+      this.blockers = [{ x: 0, y: 0, r: 72, hw: 40 }, { x: 0, y: 0, r: 14, hw: 14 }];
 
       this.buildTextures();
+      this.traffic = TC.createTraffic(this);
+
       this.buildCity();
-      this.buildBR();
+      this.buildHighway(SEGMENTS.br, {
+        seed: 99,
+        gantries: [[700, 'DISTRITO INDUSTRIAL ▼ 3 km'], [2400, 'DISTRITO INDUSTRIAL ▼ 1,5 km'], [4000, 'DISTRITO INDUSTRIAL ▼ 500 m']],
+        backText: 'TRUCK CITY ▲', backY: 1500,
+      });
       this.buildDistrict();
+      this.buildHighway(SEGMENTS.brn, {
+        seed: 123,
+        gantries: [[4000, 'NOVA CIDADE ▲ 3 km'], [2400, 'NOVA CIDADE ▲ 1,5 km'], [700, 'NOVA CIDADE ▲ 500 m']],
+        backText: 'TRUCK CITY ▼', backY: 3300,
+      });
+      this.buildNewCity();
+      this.buildYard(SEGMENTS.quarry, {
+        ground: 'tex-dirt', deadWest: true, prop: 'tex-quarry', propX: 80,
+        zone: 'quarry', sign: 'PEDREIRA SÃO JORGE',
+      });
+      this.buildYard(SEGMENTS.sawmill, {
+        ground: 'tex-grass', deadWest: false, prop: 'tex-sawmill', propX: 1620,
+        zone: 'sawmill', sign: 'SERRARIA PINHEIRO', trees: true,
+      });
       this.buildIndoor();
+
       this.createTruck();
       this.createPlayer();
       this.createBeacon();
@@ -181,12 +286,14 @@
       this.scale.on('resize', this.applyZoom, this);
       this.applyZoom();
 
+      // Liga/desliga o botão contextual após cada frame renderizado
       this.events.on(Phaser.Scenes.Events.RENDER, this.positionAction, this);
 
       TC.ui.setDriving(true);
       TC.ui.banner(this.seg.name, this.seg.sub);
     }
 
+    /* ---------------- CÂMERA ---------------- */
     applyBounds() {
       const s = this.seg;
       this.cameras.main.setBounds(s.ox - s.padX, s.oy - s.padY, s.w + 2 * s.padX, s.h + 2 * s.padY);
@@ -197,6 +304,7 @@
       const w = this.scale.width;
       const h = this.scale.height;
       if (this.indoor) {
+        // sala interna: câmera fixa, centralizada, enquadrando o cômodo inteiro
         const z = clamp(Math.min(w / (ROOM.w + 80), h / (ROOM.h + 80)), 0.35, 1.4);
         cam.setZoom(z);
         cam.centerOn(ROOM.x + ROOM.w / 2, ROOM.y + ROOM.h / 2);
@@ -207,10 +315,12 @@
 
     setSegment(seg) {
       this.seg = seg;
+      this.traffic.setSegment(seg);
       this.applyBounds();
       this.applyZoom();
     }
 
+    /* ---------------- TEXTURAS ---------------- */
     makeTexture(key, w, h, drawFn) {
       if (this.textures.exists(key)) return;
       const g = this.make.graphics({ x: 0, y: 0, add: false });
@@ -230,6 +340,12 @@
       this.makeTexture('tex-hwy', 512, 256, ART.drawHighwayTile);
       this.makeTexture('tex-rail', 16, 128, ART.drawRailTile);
       this.makeTexture('tex-warehouse', 440, 280, ART.drawWarehouse);
+      // Fase 4A
+      this.makeTexture('tex-dirt', 128, 128, ART2.drawDirtTile);
+      this.makeTexture('tex-site', 640, 420, ART2.drawSite);
+      this.makeTexture('tex-crane', 220, 220, ART2.drawCrane);
+      this.makeTexture('tex-quarry', 700, 280, ART2.drawQuarry);
+      this.makeTexture('tex-sawmill', 700, 280, ART2.drawSawmill);
     }
 
     addSolid(list, x, y, w, h) {
@@ -246,13 +362,16 @@
         .setDepth(6);
     }
 
+    /* ---------------- CIDADE ---------------- */
     buildCity() {
       const sol = this.solids.city;
       this.add.image(0, 0, 'tex-ground').setOrigin(0).setDepth(0);
 
       this.makeZone('cargo');
       this.makeZone('work');
+      this.buildCityExits();
 
+      // prédio do escritório
       this.add.image(OFFICE.x - 10, OFFICE.y - 20, 'tex-office').setOrigin(0).setDepth(4);
       this.add
         .text(OFFICE.x + OFFICE.w / 2, OFFICE.y + 80, 'TRUCK CITY', {
@@ -269,13 +388,49 @@
       this.addSolid(sol, OFFICE.x, OFFICE.y, OFFICE.w, OFFICE.h);
       CFG.hedges.forEach((h) => this.addSolid(sol, h.x, h.y, h.w, h.h));
 
+      // árvores (copa acima do caminhão, tronco sólido)
       TREES.forEach((p) => {
         this.add.image(p[0], p[1], 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
         this.addSolid(sol, p[0] - 17, p[1] - 17, 34, 34);
       });
+    }
 
-      this.addSign(700, 1760, '▼ BR-116 · DISTRITO INDUSTRIAL');
-      this.addSign(1540, 1760, '▼ BR-116');
+    // Marcações e placas das saídas norte, oeste e leste (a sul já vem na textura)
+    buildCityExits() {
+      const g = this.add.graphics().setDepth(1.5);
+
+      // seta apontando para o ângulo "a" (triângulo + haste: formas convexas)
+      const arrow = (cx, cy, a) => {
+        const rot = (x, y) => new Phaser.Geom.Point(cx + x * Math.cos(a) - y * Math.sin(a), cy + x * Math.sin(a) + y * Math.cos(a));
+        g.fillStyle(0xffffff, 0.85);
+        g.fillPoints([rot(30, 0), rot(4, -24), rot(4, 24)], true);
+        g.fillPoints([rot(4, -8), rot(-26, -8), rot(-26, 8), rot(4, 8)], true);
+      };
+
+      // norte: pistas V1 e V2 (sentido norte = metade leste da via)
+      [[1000, 100, 1050], [1680, 80, 1720]].forEach((r) => {
+        g.fillStyle(0xffd400, 0.55);
+        g.fillRect(r[0] - r[1], 66, r[1] * 2, 6);
+        arrow(r[2], 250, -Math.PI / 2);
+        arrow(r[2], 170, -Math.PI / 2);
+      });
+      // oeste: pista H1 (sentido oeste = metade norte da via)
+      g.fillStyle(0xffd400, 0.55);
+      g.fillRect(66, 900, 6, 200);
+      arrow(260, 950, Math.PI);
+      arrow(180, 950, Math.PI);
+      // leste: pista H1 (sentido leste = metade sul da via)
+      g.fillStyle(0xffd400, 0.55);
+      g.fillRect(1928, 900, 6, 200);
+      arrow(1740, 1050, 0);
+      arrow(1820, 1050, 0);
+
+      this.addSign(1000, 120, '▲ BR-116 NORTE · NOVA CIDADE');
+      this.addSign(1680, 120, '▲ BR-116 NORTE');
+      this.addSign(170, 860, '◀ PEDREIRA');
+      this.addSign(1830, 860, 'SERRARIA ▶');
+      this.addSign(700, 1760, '▼ BR-116 SUL · DISTRITO INDUSTRIAL');
+      this.addSign(1540, 1760, '▼ BR-116 SUL');
     }
 
     makeZone(key) {
@@ -301,21 +456,46 @@
       g.clear();
       g.fillStyle(z.color, active ? 0.75 : 0.32);
       g.fillRect(z.x, z.y, z.w, z.h);
+      // hachura diagonal
+      g.lineStyle(2, z.color, active ? 0.5 : 0.28);
+      for (let d = 24; d < z.w + z.h; d += 24) {
+        g.lineBetween(
+          z.x + Math.min(d, z.w), z.y + Math.max(0, d - z.w),
+          z.x + Math.max(0, d - z.h), z.y + Math.min(d, z.h)
+        );
+      }
       g.lineStyle(4, z.color, 1);
       g.strokeRect(z.x, z.y, z.w, z.h);
     }
 
-    buildBR() {
-      const S = SEGMENTS.br;
+    /* ---------------- RODOVIA BR-116 (Sul e Norte) ---------------- */
+    buildHighway(S, o) {
       const B = CFG.br;
-      const sol = this.solids.br;
+      const sol = this.solids[S.id];
       const ox = S.ox;
       const oy = S.oy;
-      const rnd = ART.mulberry32(99);
+      const rnd = ART.mulberry32(o.seed);
 
+      // grama (cobre também a margem extra da câmera)
       this.add.tileSprite(ox - S.padX, oy, S.w + 2 * S.padX, S.h, 'tex-grass').setOrigin(0).setDepth(0);
+
+      // campos de plantio ao longe
+      const fields = this.add.graphics().setDepth(0.5);
+      const fcols = [0x4d7c3f, 0x6f8f3a, 0xb59a45, 0x3f6e4a];
+      for (let i = 0; i < 16; i++) {
+        const left = i % 2 === 0;
+        const fw = 160 + rnd() * 240;
+        const fh = 240 + rnd() * 420;
+        const fx = left ? ox - 740 + rnd() * (680 - fw) : ox + S.w + 60 + rnd() * (680 - fw);
+        const fy = oy + rnd() * (S.h - fh);
+        fields.fillStyle(fcols[Math.floor(rnd() * fcols.length)], 0.45);
+        fields.fillRect(fx, fy, fw, fh);
+      }
+
+      // pista (4 pistas + acostamentos)
       this.add.tileSprite(ox + B.roadX, oy, B.roadW, S.h, 'tex-hwy').setOrigin(0).setDepth(1);
 
+      // defensas metálicas dos dois lados (sólidas)
       const railL = ox + B.roadX - 24;
       const railR = ox + B.roadX + B.roadW + 8;
       this.add.tileSprite(railL, oy, 16, S.h, 'tex-rail').setOrigin(0).setDepth(3);
@@ -323,42 +503,281 @@
       this.addSolid(sol, railL - 16, oy, 32, S.h);
       this.addSolid(sol, railR, oy, 32, S.h);
 
+      // árvores nas laterais
       for (let y = 60; y < S.h; y += 90 + rnd() * 60) {
         this.add.image(ox + 20 + rnd() * 240, oy + y, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
         this.add.image(ox + 930 + rnd() * 230, oy + y + rnd() * 40, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
       }
+      for (let y = 100; y < S.h; y += 160 + rnd() * 80) {
+        this.add.image(ox - 120 - rnd() * 520, oy + y, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+        this.add.image(ox + S.w + 120 + rnd() * 520, oy + y, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+      }
+
+      // pórticos com placas
+      o.gantries.forEach((gt) => this.addGantry(S, gt[0], gt[1]));
+
+      // marcos de quilômetro (lado direito) e escudos BR
+      for (let k = 1; k <= 7; k++) {
+        this.add
+          .text(ox + B.roadX + B.roadW + 52, oy + k * 640, 'KM ' + (100 + k), {
+            fontFamily: 'monospace', fontSize: '12px', fontStyle: 'bold', color: '#111111',
+            backgroundColor: '#f4f4f4', padding: { x: 5, y: 3 },
+          })
+          .setOrigin(0.5).setDepth(6);
+      }
+      [300, 1700, 3300].forEach((y) => this.addShield(ox + 250, oy + y));
+      this.addSign(ox + 1040, oy + o.backY, o.backText);
     }
 
+    addShield(x, y) {
+      this.add.rectangle(x, y, 46, 54, 0xf2c200).setStrokeStyle(3, 0x111111).setDepth(6);
+      this.add
+        .text(x, y, 'BR\n116', { fontFamily: 'monospace', fontSize: '15px', fontStyle: 'bold', color: '#111111', align: 'center' })
+        .setOrigin(0.5).setDepth(7);
+    }
+
+    // Pórtico sobre a pista (fica acima do caminhão)
+    addGantry(S, y, text) {
+      const B = CFG.br;
+      const x0 = S.ox + B.roadX - 36;
+      const w = B.roadW + 72;
+      const cx = S.ox + B.roadX + B.roadW / 2;
+      const g = this.add.graphics().setDepth(15);
+      g.fillStyle(0x000000, 0.22);
+      g.fillRect(x0 + 10, y + 16, w, 18);
+      g.fillStyle(0x4a5059, 1);
+      g.fillRect(x0, y, w, 14);
+      g.fillStyle(0x2f343a, 1);
+      g.fillRect(x0 - 8, y - 8, 26, 30);
+      g.fillRect(x0 + w - 18, y - 8, 26, 30);
+      g.fillStyle(0x0b6b3a, 0.96);
+      g.fillRect(cx - 190, y - 36, 380, 52);
+      g.lineStyle(3, 0xffffff, 1);
+      g.strokeRect(cx - 188, y - 34, 376, 48);
+      this.add
+        .text(cx, y - 10, text, { fontFamily: 'monospace', fontSize: '16px', fontStyle: 'bold', color: '#ffffff' })
+        .setOrigin(0.5).setDepth(16);
+    }
+
+    /* ---------------- DISTRITO INDUSTRIAL ---------------- */
     buildDistrict() {
       const S = SEGMENTS.district;
       const ox = S.ox;
       const oy = S.oy;
       const sol = this.solids.district;
+      const rnd = ART.mulberry32(5);
 
+      // gramado externo + pátio de concreto
       this.add.tileSprite(ox - S.padX, oy - S.padY, S.w + 2 * S.padX, S.h + 2 * S.padY, 'tex-grass').setOrigin(0).setDepth(0);
       this.add.tileSprite(ox, oy, S.w, S.h, 'tex-concrete').setOrigin(0).setDepth(0.2);
+
+      // ruas: entrada (norte) e via do pátio
       this.add.tileSprite(ox + 700, oy, 200, 520, 'tex-asphalt').setOrigin(0).setDepth(1);
       this.add.tileSprite(ox + 80, oy + 500, 1440, 220, 'tex-asphalt').setOrigin(0).setDepth(1);
+
+      // marcações
+      const g = this.add.graphics().setDepth(2);
+      g.fillStyle(0xe8d44d, 1);
+      for (let y = 0; y < 500; y += 80) g.fillRect(ox + 798, oy + y, 4, 40);
+      for (let x = 80; x < 1520; x += 80) {
+        if (x + 40 > 700 && x < 900) continue;
+        g.fillRect(ox + x, oy + 608, 40, 4);
+      }
+      g.fillStyle(0xf2f2f2, 0.8);
+      g.fillRect(ox + 706, oy, 4, 500);
+      g.fillRect(ox + 890, oy, 4, 500);
+      g.fillRect(ox + 80, oy + 506, 620, 4);
+      g.fillRect(ox + 900, oy + 506, 620, 4);
+      g.fillRect(ox + 80, oy + 710, 1440, 4);
+      // perímetro
+      g.lineStyle(10, 0x3b3f45, 1);
+      g.strokeRect(ox + 5, oy + 5, S.w - 10, S.h - 10);
 
       this.makeZone('warehouse');
       this.makeZone('port');
 
+      const label = (x, y, txt) => this.add
+        .text(x, y, txt, {
+          fontFamily: 'monospace', fontSize: '20px', fontStyle: 'bold', color: '#ffffff',
+          stroke: '#1d2733', strokeThickness: 4,
+        })
+        .setOrigin(0.5).setDepth(5).setAlpha(0.95);
+
+      // Armazém Central
       this.add.image(ox + 130, oy + 930, 'tex-warehouse').setOrigin(0).setDepth(4);
       this.addSolid(sol, ox + 130, oy + 930, 432, 272);
+      label(ox + 346, oy + 1040, 'ARMAZÉM CENTRAL');
+
+      // Galpão logístico (decoração)
+      this.add.image(ox + 1040, oy + 110, 'tex-warehouse').setOrigin(0).setDepth(4);
+      this.addSolid(sol, ox + 1040, oy + 110, 432, 272);
+      label(ox + 1256, oy + 220, 'GALPÃO LOGÍSTICO');
+
+      // Terminal do Porto Seco (pilhas de contêineres) e blocos de contêineres
+      const gc = this.add.graphics().setDepth(4);
+      const b1 = this.containerBlock(gc, ox + 960, oy + 930, 5, 5, rnd);
+      this.addSolid(sol, ox + 960, oy + 930, b1.w, b1.h);
+      const b2 = this.containerBlock(gc, ox + 100, oy + 70, 6, 4, rnd);
+      this.addSolid(sol, ox + 100, oy + 70, b2.w, b2.h);
+      const b3 = this.containerBlock(gc, ox + 100, oy + 300, 6, 4, rnd);
+      this.addSolid(sol, ox + 100, oy + 300, b3.w, b3.h);
+
+      this.addSign(ox + 1000, oy + 60, 'DISTRITO INDUSTRIAL ▸');
+
+      // árvores no fundo do pátio
+      [[150, 1450], [400, 1520], [700, 1450], [1000, 1530], [1300, 1460], [1500, 1540]].forEach((p) => {
+        this.add.image(ox + p[0], oy + p[1], 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+        this.addSolid(sol, ox + p[0] - 17, oy + p[1] - 17, 34, 34);
+      });
     }
 
+    // Desenha uma pilha de contêineres e devolve suas dimensões
+    containerBlock(g, x, y, cols, rows, rnd) {
+      const cw = 84, ch = 34, gap = 4;
+      const palette = [0xc0392b, 0x2980b9, 0x27ae60, 0xe67e22, 0x8e44ad, 0x16a085, 0xf1c40f, 0x7f8c8d];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cx = x + c * (cw + gap);
+          const cy = y + r * (ch + gap);
+          g.fillStyle(0x000000, 0.25);
+          g.fillRect(cx + 3, cy + 4, cw, ch);
+          g.fillStyle(palette[Math.floor(rnd() * palette.length)], 1);
+          g.fillRect(cx, cy, cw, ch);
+          g.fillStyle(0x000000, 0.18);
+          for (let i = 1; i < 7; i++) g.fillRect(cx + i * 12, cy, 2, ch);
+          g.lineStyle(2, 0x000000, 0.35);
+          g.strokeRect(cx, cy, cw, ch);
+        }
+      }
+      return { w: cols * (cw + gap), h: rows * (ch + gap) };
+    }
+
+    /* ---------------- NOVA CIDADE (zona de construção) ---------------- */
+    buildNewCity() {
+      const S = SEGMENTS.newcity;
+      const ox = S.ox;
+      const oy = S.oy;
+      const sol = this.solids.newcity;
+
+      // terra batida em volta (cobre a margem extra da câmera)
+      this.add.tileSprite(ox - S.padX, oy - S.padY, S.w + 2 * S.padX, S.h + 2 * S.padY, 'tex-dirt').setOrigin(0).setDepth(0);
+
+      // ruas: entrada (sul) e via do canteiro
+      this.add.tileSprite(ox + 700, oy + 700, 200, 900, 'tex-asphalt').setOrigin(0).setDepth(1);
+      this.add.tileSprite(ox + 60, oy + 700, 1480, 180, 'tex-asphalt').setOrigin(0).setDepth(1);
+
+      const g = this.add.graphics().setDepth(2);
+      // quadras planejadas da futura cidade (linhas de topografia)
+      g.lineStyle(3, 0xffffff, 0.14);
+      for (let x = 80; x <= 1520; x += 220) g.lineBetween(ox + x, oy + 500, ox + x, oy + 690);
+      for (let x = 780; x <= 1520; x += 190) g.lineBetween(ox + x, oy + 20, ox + x, oy + 500);
+      // marcações das ruas
+      g.fillStyle(0xe8d44d, 1);
+      for (let x = 60; x < 1540; x += 80) {
+        if (x + 40 > 700 && x < 900) continue;
+        g.fillRect(ox + x, oy + 788, 40, 4);
+      }
+      for (let y = 880; y < 1600; y += 80) g.fillRect(ox + 798, oy + y, 4, 40);
+      g.fillStyle(0xf2f2f2, 0.8);
+      g.fillRect(ox + 706, oy + 880, 4, 720);
+      g.fillRect(ox + 890, oy + 880, 4, 720);
+      g.fillRect(ox + 60, oy + 706, 640, 4);
+      g.fillRect(ox + 900, oy + 706, 640, 4);
+
+      this.makeZone('build');
+
+      // canteiro de obras (cercado, sólido) com guindastes
+      this.add.image(ox + 70, oy + 60, 'tex-site').setOrigin(0).setDepth(4);
+      this.addSolid(sol, ox + 70, oy + 60, 640, 420);
+      [[250, 220], [520, 330]].forEach((p) => this.add.image(ox + p[0] + 70, oy + p[1] + 60, 'tex-crane').setDepth(15));
+
+      // pilhas de material (areia e brita)
+      const m = this.add.graphics().setDepth(4);
+      [[1350, 250, 0xd9c07a], [1120, 160, 0xb0aca4]].forEach((p) => {
+        m.fillStyle(0x000000, 0.22);
+        m.fillCircle(ox + p[0] + 6, oy + p[1] + 8, 62);
+        m.fillStyle(p[2], 1);
+        m.fillCircle(ox + p[0], oy + p[1], 62);
+        m.fillStyle(0xffffff, 0.2);
+        m.fillCircle(ox + p[0] - 12, oy + p[1] - 12, 30);
+        this.addSolid(sol, ox + p[0] - 56, oy + p[1] - 56, 112, 112);
+      });
+
+      this.add
+        .text(ox + 1180, oy + 420, 'NOVA CIDADE\nEM CONSTRUÇÃO', {
+          fontFamily: 'monospace', fontSize: '24px', fontStyle: 'bold', color: '#ffffff', align: 'center',
+          backgroundColor: '#b8431f', padding: { x: 12, y: 8 },
+        })
+        .setOrigin(0.5).setDepth(6);
+      this.addSign(ox + 800, oy + 1480, '▼ BR-116 · TRUCK CITY');
+    }
+
+    /* ---------------- ESTRADAS RURAIS (Pedreira e Serraria) ---------------- */
+    buildYard(S, o) {
+      const ox = S.ox;
+      const oy = S.oy;
+      const sol = this.solids[S.id];
+
+      // terreno (cobre a margem extra da câmera) e estrada
+      this.add.tileSprite(ox - S.padX, oy - S.padY, S.w + 2 * S.padX, S.h + 2 * S.padY, o.ground).setOrigin(0).setDepth(0);
+      this.add.tileSprite(ox, oy + 300, S.w, 200, 'tex-asphalt').setOrigin(0).setDepth(1);
+
+      const g = this.add.graphics().setDepth(2);
+      g.fillStyle(0xf2f2f2, 0.8);
+      g.fillRect(ox, oy + 308, S.w, 3);
+      g.fillRect(ox, oy + 489, S.w, 3);
+      g.fillStyle(0xe8d44d, 1);
+      for (let x = 0; x < S.w; x += 80) g.fillRect(ox + x, oy + 398, 40, 4);
+
+      // cancela listrada no fim da estrada
+      const bx = o.deadWest ? ox : ox + S.w - 16;
+      for (let i = 0; i < 10; i++) {
+        g.fillStyle(i % 2 ? 0xffffff : 0xe74c3c, 1);
+        g.fillRect(bx, oy + 300 + i * 20, 16, 20);
+      }
+
+      // instalações (pedreira ou serraria) ao norte da estrada
+      this.add.image(ox + o.propX, oy + 6, o.prop).setOrigin(0).setDepth(4);
+      this.addSolid(sol, ox + o.propX, oy, 700, 272);
+      this.addSign(ox + o.propX + 350, oy + 288, o.sign, '#7a3b12');
+
+      this.makeZone(o.zone);
+
+      if (o.trees) {
+        for (let x = 120; x < S.w; x += 240) {
+          const ty = oy + 740 + ((x * 7) % 30);
+          this.add.image(ox + x, ty, 'tex-tree').setOrigin(0.5, 0.47).setDepth(12);
+          this.addSolid(sol, ox + x - 17, ty - 17, 34, 34);
+        }
+      }
+    }
+
+    /* ---------------- SALA INTERNA ---------------- */
     buildIndoor() {
       this.add.image(ROOM.x, ROOM.y, 'tex-room').setOrigin(0).setDepth(1);
+
       const S = (x, y, w, h) => this.addSolid(this.inSolids, ROOM.x + x, ROOM.y + y, w, h);
-      S(40, 100, 190, 56);
-      S(250, 100, 44, 50);
-      S(298, 100, 44, 50);
-      S(370, 104, 28, 36);
-      S(460, 100, 220, 100);
-      S(90, 330, 200, 110);
-      S(540, 420, 170, 70);
+      S(40, 100, 190, 56);   // estante
+      S(250, 100, 44, 50);   // arquivo 1
+      S(298, 100, 44, 50);   // arquivo 2
+      S(370, 104, 28, 36);   // bebedouro
+      S(460, 100, 220, 100); // mesa do computador
+      S(716, 104, 40, 40);   // planta
+      S(90, 330, 200, 110);  // mesa de reunião
+      S(540, 420, 170, 70);  // sofá
+      S(570, 350, 110, 50);  // mesa de centro
+      S(40, 470, 40, 40);    // planta inferior esquerda
+      S(730, 470, 40, 40);   // planta inferior direita
+
+      // brilho sutil da tela do computador
+      const glow = this.add
+        .rectangle(ROOM.x + 570, ROOM.y + 133, 98, 48, 0x6fb4ff, 0.1)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(2);
+      this.tweens.add({ targets: glow, alpha: 0.2, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
 
+    /* ---------------- CAMINHÃO ---------------- */
     createTruck() {
       const T = TRUCK;
       const h = T.spawn.heading;
@@ -369,6 +788,7 @@
         steer: 0,
         reverseLock: false,
         portalHit: null,
+        // O estado físico fica no EIXO TRASEIRO (modelo bicicleta)
         rx: T.spawn.x - Math.cos(h) * T.rearToCenter,
         ry: T.spawn.y - Math.sin(h) * T.rearToCenter,
         cx: T.spawn.x,
@@ -379,21 +799,25 @@
       const shadow = this.add.rectangle(3, 5, 140, 54, 0x000000, 0.25);
       const g = this.add.graphics();
 
+      // baú
       g.fillStyle(0xc4cad1, 1);
       g.fillRect(-70, -27, 92, 54);
       g.lineStyle(2, 0x6b7480, 1);
       g.strokeRect(-70, -27, 92, 54);
 
+      // rodas traseiras (fixas)
       g.fillStyle(0x0b0b0b, 1);
       g.fillRect(-56, -31, 22, 8);
       g.fillRect(-56, 23, 22, 8);
 
-      this.cargoG = this.add.graphics();
-      this.cabG = this.add.graphics();
+      this.cargoG = this.add.graphics();  // caixas sobre o baú (quando carregado)
+      this.cabG = this.add.graphics();    // cabine (muda de cor com a pintura)
 
+      // lanternas traseiras (acendem ao frear)
       this.tailL = this.add.rectangle(-69, -19, 3, 10, 0x6b0000);
       this.tailR = this.add.rectangle(-69, 19, 3, 10, 0x6b0000);
 
+      // rodas dianteiras: giram conforme o esterço (feedback visual)
       const fx = T.wheelbase / 2;
       this.wheelFL = this.add.rectangle(fx, -27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
       this.wheelFR = this.add.rectangle(fx, 27, 22, 8, 0x0b0b0b).setStrokeStyle(1, 0x8a8a8a);
@@ -413,6 +837,11 @@
       g.strokeRect(24, -25, 46, 50);
       g.fillStyle(0x1b2a3a, 1);
       g.fillRect(52, -20, 12, 40);
+      g.fillStyle(0xfff3a0, 1);
+      g.fillRect(68, -22, 3, 9);
+      g.fillRect(68, 13, 3, 9);
+      g.fillStyle(0xffffff, 1);
+      g.fillRect(32, -29, 16, 3); // marca da porta do motorista (lado esquerdo)
     }
 
     drawCargo(contractId) {
@@ -435,6 +864,7 @@
       }
     }
 
+    // Atualiza pintura e carga visíveis conforme o estado salvo
     refreshTruckLook() {
       const col = STORE.data.paint;
       if (this.paintKey !== col) {
@@ -449,6 +879,7 @@
       }
     }
 
+    /* ---------------- PERSONAGEM ---------------- */
     createPlayer() {
       const shadow = this.add.ellipse(2, 3, 24, 22, 0x000000, 0.25);
       const body = this.add.circle(0, 0, PLAYER.radius, 0x2d7ff9).setStrokeStyle(2, 0xffffff);
@@ -462,6 +893,7 @@
         .setVisible(false);
     }
 
+    // Contorno pulsante na zona do objetivo da missão
     createBeacon() {
       this.beacon = this.add
         .rectangle(0, 0, 100, 100, 0xffffff, 0)
@@ -483,6 +915,7 @@
       this.beacon.setPosition(z.x + z.w / 2, z.y + z.h / 2).setSize(z.w + 16, z.h + 16).setVisible(true);
     }
 
+    /* ---------------- INPUT ---------------- */
     createInput() {
       const K = Phaser.Input.Keyboard.KeyCodes;
       this.keys = this.input.keyboard.addKeys({
@@ -493,12 +926,14 @@
 
       if (this.input.mouse) this.input.mouse.disableContextMenu();
 
+      // Clique (PC) ou toque (celular) no mapa: andar até o ponto
       this.input.on('pointerdown', (pointer) => {
         if (this.state !== 'foot' || this.busy || this.uiOpen || this.teleporting) return;
         this.setTarget(pointer.worldX, pointer.worldY);
       });
     }
 
+    // Área onde o jogador pode andar (fora ou dentro do escritório)
     walkArea() {
       const R = PLAYER.radius;
       if (this.indoor) {
@@ -533,14 +968,15 @@
       if (TC.consumeAction()) action = true;
 
       return {
-        left, right, up, down,
-        throttle: up || m.gas ? 1 : 0,
+        left, right, up, down,                                  // para andar a pé
+        throttle: up || m.gas ? 1 : 0,                          // para dirigir
         brake: down || m.brake ? 1 : 0,
         steer: clamp((right ? 1 : 0) - (left ? 1 : 0) + m.wheel, -1, 1),
         action,
       };
     }
 
+    /* ---------------- LOOP PRINCIPAL ---------------- */
     update(time, delta) {
       const dt = Math.min(delta / 1000, 0.05);
       TC.ui.update(dt);
@@ -550,21 +986,25 @@
       if (this.hitCooldown > 0) this.hitCooldown -= dt;
 
       const frozen = this.uiOpen || this.busy || this.teleporting;
-      let inp = this.readInput();
+      let inp = this.readInput(); // sempre lê, para não acumular "teclas pendentes"
       if (frozen) {
         inp = { left: 0, right: 0, up: 0, down: 0, throttle: 0, brake: 0, steer: 0, action: false };
       }
 
       this.interaction = frozen ? null : this.computeInteraction();
 
+      // durante o fade de teleporte nada se move
       if (this.teleporting) {
         this.positionAction();
         return;
       }
 
+      if (!this.uiOpen) this.updateTraffic(dt);
+
       if (this.state === 'driving') {
         this.updateTruck(dt, inp, false);
       } else {
+        // sem motorista: freio de mão e volante volta ao centro
         this.updateTruck(dt, { throttle: 0, brake: 0, steer: 0 }, true);
         if (!frozen) this.updatePlayer(dt, inp);
       }
@@ -579,10 +1019,25 @@
       this.updateObjectiveUi();
     }
 
+    // Tráfego NPC: os carros freiam para o caminhão (e para o jogador a pé)
+    updateTraffic(dt) {
+      const t = this.truck;
+      const b = this.blockers;
+      b[0].x = t.cx;
+      b[0].y = t.cy;
+      const foot = this.state === 'foot' && !this.indoor;
+      if (foot) {
+        b[1].x = this.p.x;
+        b[1].y = this.p.y;
+      }
+      this.traffic.update(dt, this.cameras.main.worldView, b, foot ? 2 : 1);
+    }
+
+    /* ---------------- FÍSICA DO CAMINHÃO (Ackermann / bicicleta) ---------------- */
     updateTruck(dt, inp, parked) {
       const T = TRUCK;
       const t = this.truck;
-      const M = STORE.mods();
+      const M = STORE.mods(); // upgrades e condição
       const maxFwd = T.maxFwd * M.maxFwd;
       const accel = T.accel * M.accel;
       const brakeF = T.brake * M.brake;
@@ -595,25 +1050,26 @@
       if (parked) {
         v = approach(v, 0, brakeF * 0.8 * dt);
       } else if (gas && !brk) {
-        if (v < 0) v = Math.min(0, v + brakeF * dt);
-        else v += accel * (1 - 0.6 * (v / maxFwd)) * dt;
+        if (v < 0) v = Math.min(0, v + brakeF * dt);                  // freia a ré antes de avançar
+        else v += accel * (1 - 0.6 * (v / maxFwd)) * dt;              // aceleração gradual
       } else if (brk && !gas) {
         if (v > 1) {
-          v = Math.max(0, v - brakeF * dt);
-          t.reverseLock = true;
+          v = Math.max(0, v - brakeF * dt);                           // frenagem
+          t.reverseLock = true;                                       // evita engatar ré sem querer
         } else if (!t.reverseLock) {
-          v -= T.revAccel * dt;
+          v -= T.revAccel * dt;                                       // ré
         } else {
           v = approach(v, 0, brakeF * dt);
         }
       } else if (gas && brk) {
         v = approach(v, 0, brakeF * dt);
       } else {
-        v = approach(v, 0, (T.roll + Math.abs(v) * T.drag) * dt);
+        v = approach(v, 0, (T.roll + Math.abs(v) * T.drag) * dt);     // inércia / atrito
       }
 
       v = clamp(v, -T.maxRev, maxFwd);
 
+      // Esterço: limitado conforme a velocidade e suavizado
       const speedRatio = clamp(Math.abs(v) / maxFwd, 0, 1);
       const maxSteer = lerp(T.steerLow, T.steerHigh * M.steerHigh, speedRatio);
       const targetSteer = inp.steer * maxSteer;
@@ -622,38 +1078,46 @@
 
       const prev = { rx: t.rx, ry: t.ry, heading: t.heading };
 
+      // Rotação SÓ muda com a velocidade (v = 0 -> não gira)
       t.heading += (v / T.wheelbase) * Math.tan(t.steer) * dt;
 
+      // Movimento do eixo traseiro ao longo do heading
       t.rx += Math.cos(t.heading) * v * dt;
       t.ry += Math.sin(t.heading) * v * dt;
 
       let cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
       let cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
 
-      if (COLLISIONS.truck && Math.abs(v) > 0.01 && this.truckHitsSolid(cx, cy, t.heading)) {
-        t.rx = prev.rx;
-        t.ry = prev.ry;
-        t.heading = prev.heading;
-        cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
-        cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
-        const sp = Math.abs(v);
-        v = -v * 0.2;
-        if (sp > 20) this.applyDamage((sp / maxFwd) * 12);
+      // Colisão (prédios, árvores, defensas, contêineres e carros NPC): volta ao frame anterior + dano
+      if (COLLISIONS.truck && Math.abs(v) > 0.01) {
+        const hit = this.truckHit(cx, cy, t.heading);
+        if (hit) {
+          t.rx = prev.rx;
+          t.ry = prev.ry;
+          t.heading = prev.heading;
+          cx = t.rx + Math.cos(t.heading) * T.rearToCenter;
+          cy = t.ry + Math.sin(t.heading) * T.rearToCenter;
+          const sp = Math.abs(v);
+          v = -v * 0.2; // pequeno "quique" para trás
+          // carro NPC já atingido há pouco não causa dano de novo
+          const fresh = !hit.car || hit.car.stun <= 0.3;
+          if (hit.car) this.traffic.hit(hit.car);
+          if (sp > 20 && fresh) this.applyDamage((sp / maxFwd) * (hit.car ? 14 : 12));
+        }
       }
 
+      // Limites do segmento: nas ruas que levam a outra área vira PORTAL (teleporte)
       const seg = this.seg;
       const MG = 80;
-      const hit = this.state === 'driving' ? this.portalAt(cx, cy) : null;
-      t.portalHit = hit;
-      if (!hit) {
+      const hitPortal = this.state === 'driving' ? this.portalAt(cx, cy) : null;
+      t.portalHit = hitPortal;
+      if (!hitPortal) {
         const ccx = clamp(cx, seg.ox + MG, seg.ox + seg.w - MG);
         const ccy = clamp(cy, seg.oy + MG, seg.oy + seg.h - MG);
         if (ccx !== cx || ccy !== cy) {
           if (this.state === 'driving' && Math.abs(v) > 60 && this.noticeCooldown <= 0) {
             this.noticeCooldown = 3;
-            if (seg.id === 'city') TC.ui.flash('Fim da via. A saída para a BR-116 fica ao sul.', 2600);
-            else if (seg.id === 'district') TC.ui.flash('Fim do pátio. A saída para a BR-116 fica ao norte.', 2600);
-            else TC.ui.flash('Fim da pista.', 1800);
+            TC.ui.flash(seg.dead, 2600);
           }
           v *= 0.6;
           t.rx += ccx - cx;
@@ -669,34 +1133,39 @@
       t.brakeLights = brk && v > 1;
     }
 
-    truckHitsSolid(cx, cy, heading) {
+    // Retângulo girado (caminhão) x retângulos alinhados (SAT em 4 eixos).
+    // Testa os sólidos do segmento e os carros NPC. Devolve o sólido atingido (ou null).
+    truckHit(cx, cy, heading) {
       const hx = TRUCK.halfL;
       const hy = TRUCK.halfW;
       const cos = Math.cos(heading);
       const sin = Math.sin(heading);
       const ac = Math.abs(cos);
       const as = Math.abs(sin);
-      const ex = ac * hx + as * hy;
-      const ey = as * hx + ac * hy;
+      const ex = ac * hx + as * hy; // meia-extensão do caminhão no eixo X do mundo
+      const ey = as * hx + ac * hy; // ... no eixo Y
 
-      const list = this.solids[this.seg.id];
-      for (let i = 0; i < list.length; i++) {
-        const s = list[i];
-        const dx = s.cx - cx;
-        const dy = s.cy - cy;
-        const rr = TRUCK_RADIUS + s.r;
-        if (dx * dx + dy * dy > rr * rr) continue;
-        const hw = s.w / 2;
-        const hh = s.h / 2;
-        if (Math.abs(dx) >= ex + hw) continue;
-        if (Math.abs(dy) >= ey + hh) continue;
-        const du = dx * cos + dy * sin;
-        if (Math.abs(du) >= hx + (hw * ac + hh * as)) continue;
-        const dv = -dx * sin + dy * cos;
-        if (Math.abs(dv) >= hy + (hw * as + hh * ac)) continue;
-        return true;
+      const lists = [this.solids[this.seg.id], this.traffic.solids];
+      for (let n = 0; n < 2; n++) {
+        const list = lists[n];
+        for (let i = 0; i < list.length; i++) {
+          const s = list[i];
+          const dx = s.cx - cx;
+          const dy = s.cy - cy;
+          const rr = TRUCK_RADIUS + s.r;
+          if (dx * dx + dy * dy > rr * rr) continue;       // rejeição rápida
+          const hw = s.w / 2;
+          const hh = s.h / 2;
+          if (Math.abs(dx) >= ex + hw) continue;           // eixo X
+          if (Math.abs(dy) >= ey + hh) continue;           // eixo Y
+          const du = dx * cos + dy * sin;                   // eixo do caminhão (comprimento)
+          if (Math.abs(du) >= hx + (hw * ac + hh * as)) continue;
+          const dv = -dx * sin + dy * cos;                  // eixo do caminhão (largura)
+          if (Math.abs(dv) >= hy + (hw * as + hh * ac)) continue;
+          return s;
+        }
       }
-      return false;
+      return null;
     }
 
     applyDamage(dmg) {
@@ -708,6 +1177,8 @@
       }
     }
 
+    /* ---------------- PORTAIS / TELEPORTE ---------------- */
+    // Devolve o portal atingido (ou null) para a posição do centro do caminhão
     portalAt(cx, cy) {
       const seg = this.seg;
       const MG = 80;
@@ -745,6 +1216,7 @@
         const from = this.seg;
         const to = SEGMENTS[p.to];
 
+        // preserva a posição lateral dentro da pista (limitada por "spread")
         const lateralIsX = p.edge === 'N' || p.edge === 'S';
         const lat = lateralIsX ? t.cx - from.ox : t.cy - from.oy;
         const off = clamp(lat - (p.min + p.max) / 2, -p.spread, p.spread);
@@ -772,6 +1244,7 @@
       });
     }
 
+    /* ---------------- MISSÕES ---------------- */
     truckCorners() {
       const hx = TRUCK.halfL;
       const hy = TRUCK.halfW;
@@ -837,6 +1310,7 @@
       TC.ui.showSummary(html);
     }
 
+    // Seta de navegação para o objetivo (entre áreas, aponta para a saída certa)
     navInfo(zoneKey) {
       const z = ZONES[zoneKey];
       const ref = this.state === 'driving' ? { x: this.truck.cx, y: this.truck.cy } : { x: this.p.x, y: this.p.y };
@@ -911,6 +1385,7 @@
       }
     }
 
+    /* ---------------- PERSONAGEM A PÉ ---------------- */
     updatePlayer(dt, inp) {
       const p = this.p;
       const A = this.walkArea();
@@ -923,6 +1398,7 @@
       let moving = false;
 
       if (dx || dy) {
+        // teclado/D-pad cancela o "clicar para andar"
         this.clearTarget();
         const len = Math.hypot(dx, dy);
         dx /= len;
@@ -953,6 +1429,7 @@
       p.x = clamp(p.x, A.x0, A.x1);
       p.y = clamp(p.y, A.y0, A.y1);
 
+      // se o alvo está bloqueado (ex.: dentro do caminhão/prédio), desiste
       if (this.target) {
         const moved = Math.hypot(p.x - ox, p.y - oy);
         if (moved < step * 0.3) {
@@ -964,6 +1441,7 @@
       }
     }
 
+    // O personagem não atravessa o caminhão (círculo x retângulo girado)
     pushPlayerOutOfTruck() {
       const t = this.truck;
       const p = this.p;
@@ -1000,6 +1478,7 @@
       p.y = t.cy + lx * sin + ly * cos;
     }
 
+    // Jogador x objetos sólidos do segmento (ou móveis da sala)
     collidePlayerSolids() {
       const p = this.p;
       const R = PLAYER.radius;
@@ -1028,16 +1507,18 @@
       }
     }
 
+    /* ---------------- INTERAÇÕES CONTEXTUAIS ---------------- */
     doorWorld() {
       return toWorld(this.truck, TRUCK.door.x, TRUCK.door.y);
     }
 
+    // Decide qual interação está disponível AGORA (ou null = botão oculto)
     computeInteraction() {
       const t = this.truck;
       const p = this.p;
 
       if (this.state === 'driving') {
-        if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) return null;
+        if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) return null; // em movimento: sem botão
         return { id: 'truck-exit', label: 'Sair do Caminhão' };
       }
 
@@ -1063,6 +1544,7 @@
       return { id: best.id, label: best.label };
     }
 
+    // O botão contextual é FIXO no canto inferior direito (CSS). Aqui só liga/desliga.
     positionAction() {
       const it = this.interaction;
       TC.ui.setAction(it ? { label: it.label } : null);
@@ -1087,6 +1569,7 @@
       }
     }
 
+    /* ---------------- ENTRAR / SAIR DO CAMINHÃO ---------------- */
     tryExit() {
       const t = this.truck;
       if (Math.abs(t.speed) > TRUCK.exitMaxSpeed) {
@@ -1097,7 +1580,7 @@
       const A = this.walkArea();
       const pos = toWorld(t, TRUCK.door.x, -(TRUCK.halfW + R + 10));
       this.p.setPosition(clamp(pos.x, A.x0, A.x1), clamp(pos.y, A.y0, A.y1));
-      this.p.rotation = t.heading - Math.PI / 2;
+      this.p.rotation = t.heading - Math.PI / 2; // olhando para fora da porta
       this.p.setVisible(true);
 
       this.state = 'foot';
@@ -1114,6 +1597,7 @@
       TC.ui.setDriving(true);
     }
 
+    /* ---------------- ESCRITÓRIO: ENTRAR / SAIR (fade) ---------------- */
     enterBuilding() {
       this.busy = true;
       this.clearTarget();
@@ -1122,7 +1606,7 @@
       this.time.delayedCall(240, () => {
         this.indoor = true;
         this.p.setPosition(ROOM_SPAWN.x, ROOM_SPAWN.y);
-        this.p.rotation = -Math.PI / 2;
+        this.p.rotation = -Math.PI / 2; // entrou olhando para o fundo da sala
         cam.stopFollow();
         cam.removeBounds();
         cam.setBackgroundColor('#0d1117');
@@ -1141,7 +1625,7 @@
       this.time.delayedCall(240, () => {
         this.indoor = false;
         this.p.setPosition(OFFICE_EXIT.x, OFFICE_EXIT.y);
-        this.p.rotation = Math.PI / 2;
+        this.p.rotation = Math.PI / 2; // saiu olhando para a rua
         cam.setBackgroundColor('#1d2b20');
         this.applyBounds();
         this.applyZoom();
@@ -1153,10 +1637,11 @@
       });
     }
 
+    /* ---------------- COMPUTADOR ---------------- */
     openComputer() {
       this.uiOpen = true;
       this.clearTarget();
-      this.input.keyboard.enabled = false;
+      this.input.keyboard.enabled = false; // WASD/E não mexem no jogo enquanto o sistema está aberto
       TC.ui.resetInputs();
       const before = STORE.data.mission ? STORE.data.mission.id : null;
       TC.pc.open(() => {
@@ -1171,11 +1656,15 @@
       });
     }
 
+    /* ---------------- VISUAL / HUD ---------------- */
     syncVisuals() {
       const t = this.truck;
       this.truckView.setPosition(t.cx, t.cy).setRotation(t.heading);
+
+      // rodas dianteiras mostram para onde está esterçando
       this.wheelFL.rotation = t.steer;
       this.wheelFR.rotation = t.steer;
+
       const tail = t.brakeLights ? 0xff2a2a : 0x6b0000;
       this.tailL.setFillStyle(tail);
       this.tailR.setFillStyle(tail);
@@ -1217,6 +1706,7 @@
     }
   }
 
+  /* ================= INICIALIZAÇÃO ================= */
   TC.startGame = function () {
     new Phaser.Game({
       type: Phaser.AUTO,
