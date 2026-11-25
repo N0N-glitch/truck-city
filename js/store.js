@@ -1,9 +1,7 @@
 /* ============================================================
-   TRUCK CITY - store.js  (Fase 4B)
-   Economia, contratos/missões, estoque e loja, condição do caminhão,
+   TRUCK CITY - store.js  (Fase 4B - Sem restrição de estoque)
+   Economia, contratos/missões, condição do caminhão,
    upgrades, pintura, celular móvel e salvamento (localStorage).
-   Uso: TC.store.data (estado), TC.store.acceptContract(id), etc.
-   Sempre leia o estado por TC.store.data (a referência muda no reset).
    ============================================================ */
 (function () {
   'use strict';
@@ -13,14 +11,12 @@
 
   /* ---------- DADOS ESTÁTICOS ---------- */
 
-  // Destinos possíveis das entregas (a coleta é sempre na Zona de Carga da cidade)
   const DEST = {
     work:      { name: 'Zona de Obra',    where: 'Truck City',                       far: false },
     warehouse: { name: 'Armazém Central', where: 'Distrito Industrial · via BR-116', far: true  },
     port:      { name: 'Porto Seco',      where: 'Distrito Industrial · via BR-116', far: true  },
   };
 
-  // time = prazo em segundos (conta a partir do carregamento)
   const CONTRACTS = [
     { id: 'c1', client: 'Construtora Aurora',   title: 'Cimento para o Centro Cívico', cargo: 'Cimento · 40 sacos',      color: '#b9b9b9', to: 'work',      pay: 900,  time: 110, risk: 'baixo', level: 1 },
     { id: 'c2', client: 'Prefeitura Municipal', title: 'Areia para a Praça da Matriz', cargo: 'Areia · 8 m³',            color: '#d8b66a', to: 'work',      pay: 1300, time: 100, risk: 'baixo', level: 1 },
@@ -32,9 +28,7 @@
     { id: 'c7', client: 'PetroSul',             title: 'Combustível especial',         cargo: 'Tambores · 20 un',        color: '#e4572e', to: 'port',      pay: 6800, time: 160, risk: 'alto',  level: 3 },
   ];
 
-  /* ---------- MERCADORIAS (estoque e loja) ----------
-     price = preço por unidade; lot = tamanho de um "lote" de compra;
-     cap = capacidade máxima do armazém para essa mercadoria. */
+  // Mantido para compatibilidade com pc.js / content.js sem gerar erros
   const GOODS = {
     cement:      { name: 'Cimento',                 unit: 'sacos',  price: 9,    lot: 40, cap: 300 },
     sand:        { name: 'Areia',                   unit: 'm³',     price: 55,   lot: 8,  cap: 80  },
@@ -49,19 +43,7 @@
     parts:       { name: 'Peças e ferramentas',     unit: 'un',     price: 60,   lot: 10, cap: 150 },
   };
 
-  // Quanto cada contrato consome do estoque (ao ser aceito).
-  // Contratos novos podem somar entradas aqui: TC.store.CONTRACT_GOODS.c99 = { ... }
-  const CONTRACT_GOODS = {
-    c1: { cement: 40 }, c2: { sand: 8 }, c3: { wood: 60 }, c4: { pallets: 12 }, c5: { electronics: 30 },
-    c6: { container: 1 }, c7: { drums: 20 }, c8: { machinery: 3 },
-    c9: { steel: 24 }, c10: { concrete: 6 }, c11: { parts: 14 }, c12: { parts: 20 },
-    c13: { machinery: 2, steel: 10 },
-  };
-
-  // Estoque inicial (o resto começa zerado para você sentir a escassez)
-  const STARTER_STOCK = { cement: 80, sand: 16, pallets: 12 };
-
-  // Celular Móvel: preço alto e desafiador (é muito útil)
+  const CONTRACT_GOODS = {};
   const PHONE_PRICE = 25000;
 
   const UPGRADES = {
@@ -80,14 +62,14 @@
   ];
   const PAINT_COST = 200;
 
-  const LEVEL_STEP = 3;   // a cada 3 entregas sobe 1 nível
+  const LEVEL_STEP = 3;
   const MAX_LEVEL = 5;
   const REPAIR_PER_POINT = 15;
 
   /* ---------- ESTADO ---------- */
-  function emptyStock() {
+  function fullStock() {
     const s = {};
-    Object.keys(GOODS).forEach((k) => { s[k] = 0; });
+    Object.keys(GOODS).forEach((k) => { s[k] = GOODS[k].cap; });
     return s;
   }
 
@@ -103,11 +85,11 @@
       upgrades: { engine: 0, brakes: 0, steering: 0 },
       paint: '#d64541',
       paintsOwned: ['#d64541'],
-      stock: Object.assign(emptyStock(), STARTER_STOCK),
-      phone: false,    // Celular Móvel comprado?
-      mission: null,   // { id, stage:'pickup'|'transit', timeLeft, damage, reserved }
-      log: [],         // { t, label, amount }
-      history: [],     // { t, title, total }
+      stock: fullStock(),
+      phone: false,
+      mission: null,
+      log: [],
+      history: [],
     };
   }
 
@@ -121,16 +103,11 @@
         if (s[k] !== undefined && typeof s[k] === typeof d[k]) d[k] = s[k];
       });
       d.upgrades = Object.assign({ engine: 0, brakes: 0, steering: 0 }, s.upgrades || {});
-      // estoque: saves antigos (sem estoque) recebem o estoque inicial
-      d.stock = Object.assign(emptyStock(), s.stock && typeof s.stock === 'object' ? s.stock : STARTER_STOCK);
-      Object.keys(d.stock).forEach((k) => {
-        const n = Number(d.stock[k]);
-        d.stock[k] = isFinite(n) && n > 0 ? Math.floor(n) : 0;
-      });
+      d.stock = fullStock();
       if (!Array.isArray(d.log)) d.log = [];
       if (!Array.isArray(d.history)) d.history = [];
       if (!Array.isArray(d.paintsOwned) || !d.paintsOwned.length) d.paintsOwned = [d.paint];
-      if (d.mission && !contractById(d.mission.id)) d.mission = null; // contrato inexistente
+      if (d.mission && !contractById(d.mission.id)) d.mission = null;
       return d;
     } catch (e) {
       return fresh();
@@ -164,13 +141,11 @@
 
     subscribe: function (fn) { subs.push(fn); },
 
-    // Avisa os assinantes (tela do computador) e marca para salvar
     touch: function () {
       dirty = true;
       subs.forEach((fn) => { try { fn(); } catch (e) { /* ignora */ } });
     },
 
-    // Só marca para salvar (uso por frame, sem redesenhar a interface)
     markDirty: function () { dirty = true; },
 
     save: function () {
@@ -188,7 +163,6 @@
     level: function () {
       return Math.min(MAX_LEVEL, 1 + Math.floor(store.data.deliveries / LEVEL_STEP));
     },
-    // progresso dentro do nível atual: { done, need, pct }
     levelProgress: function () {
       const lvl = store.level();
       if (lvl >= MAX_LEVEL) return { done: LEVEL_STEP, need: LEVEL_STEP, pct: 1, max: true };
@@ -213,40 +187,24 @@
       return true;
     },
 
-    /* ----- estoque e loja ----- */
+    /* ----- estoque desativado (sempre disponível) ----- */
     stockOf: function (id) {
-      return store.data.stock[id] || 0;
+      return GOODS[id] ? GOODS[id].cap : 999;
     },
 
-    // mercadorias que um contrato consome: { cement: 40 }
-    goodsFor: function (c) {
-      return CONTRACT_GOODS[c.id] || {};
+    goodsFor: function () {
+      return {};
     },
 
-    // o que falta no estoque para aceitar o contrato: [{ id, need, have }]
-    missingGoods: function (c) {
-      const need = store.goodsFor(c);
-      return Object.keys(need)
-        .filter((id) => store.stockOf(id) < need[id])
-        .map((id) => ({ id: id, need: need[id], have: store.stockOf(id) }));
+    missingGoods: function () {
+      return [];
     },
 
-    // compra "lots" lotes de uma mercadoria (respeita saldo e capacidade do armazém)
-    buyGoods: function (id, lots) {
-      const g = GOODS[id];
-      const n = Math.max(1, Math.floor(lots) || 1);
-      if (!g) return { ok: false, msg: 'Mercadoria inválida.' };
-      const qty = g.lot * n;
-      const cost = g.price * qty;
-      if (store.stockOf(id) + qty > g.cap) return { ok: false, msg: 'Armazém cheio para ' + g.name + ' (máx. ' + g.cap + ').' };
-      if (!store.spend(cost, 'Compra: ' + g.name + ' ×' + qty)) return { ok: false, msg: 'Saldo insuficiente.' };
-      store.data.stock[id] = store.stockOf(id) + qty;
-      store.touch();
-      store.save();
-      return { ok: true, msg: g.name + ': +' + qty + ' ' + g.unit + ' no estoque.' };
+    buyGoods: function () {
+      return { ok: true, msg: 'Estoque ilimitado ativado.' };
     },
 
-    // Celular Móvel (upgrade caro e muito útil)
+    // Celular Móvel
     buyPhone: function () {
       const d = store.data;
       if (d.phone) return { ok: false, msg: 'Você já tem o Celular Móvel.' };
@@ -258,7 +216,6 @@
     },
 
     /* ----- missões ----- */
-    // O contrato RESERVA (consome) o estoque ao ser aceito.
     acceptContract: function (id) {
       const d = store.data;
       const c = contractById(id);
@@ -266,21 +223,12 @@
       if (d.mission) return { ok: false, msg: 'Termine ou cancele o contrato atual primeiro.' };
       if (c.level > store.level()) return { ok: false, msg: 'Nível da transportadora insuficiente.' };
 
-      const miss = store.missingGoods(c);
-      if (miss.length) {
-        const names = miss.map((m) => GOODS[m.id].name).join(', ');
-        return { ok: false, msg: 'Estoque insuficiente (' + names + '). Compre na Loja.' };
-      }
-
-      const need = store.goodsFor(c);
-      Object.keys(need).forEach((k) => { d.stock[k] = store.stockOf(k) - need[k]; });
-      d.mission = { id: c.id, stage: 'pickup', timeLeft: null, damage: 0, reserved: true };
+      d.mission = { id: c.id, stage: 'pickup', timeLeft: null, damage: 0, reserved: false };
       store.touch();
       store.save();
       return { ok: true, msg: 'Contrato aceito! Vá até a Zona de Carga.' };
     },
 
-    // Cancelar custa 10% do valor do contrato (mínimo $ 50, limitado ao saldo)
     cancelPenalty: function () {
       const m = store.data.mission;
       if (!m) return 0;
@@ -298,22 +246,12 @@
         d.spent += pen;
         store.logTx('Multa por cancelar contrato', -pen);
       }
-      // antes de carregar, as mercadorias reservadas voltam ao estoque
-      let refunded = false;
-      if (m.stage === 'pickup' && m.reserved) {
-        const need = store.goodsFor(contractById(m.id));
-        Object.keys(need).forEach((k) => {
-          d.stock[k] = Math.min(GOODS[k].cap, store.stockOf(k) + need[k]);
-        });
-        refunded = true;
-      }
       d.mission = null;
       store.touch();
       store.save();
-      return { ok: true, msg: 'Contrato cancelado. Multa: ' + store.fmt(pen) + (refunded ? ' · estoque devolvido.' : '') };
+      return { ok: true, msg: 'Contrato cancelado. Multa: ' + store.fmt(pen) };
     },
 
-    // Chamado pelo jogo ao descarregar no destino. Devolve o resumo do pagamento.
     completeMission: function () {
       const d = store.data;
       const m = d.mission;
@@ -323,9 +261,9 @@
 
       const base = c.pay;
       const left = m.timeLeft == null ? 0 : m.timeLeft;
-      const bonus = left >= c.time * 0.5 ? Math.round(base * 0.2) : 0;   // chegou com 50%+ do prazo sobrando
-      const late = left < 0 ? Math.round(base * 0.25) : 0;               // passou do prazo
-      const dmgPct = Math.min(40, (m.damage || 0) * 1.5);                // até 40% de desconto
+      const bonus = left >= c.time * 0.5 ? Math.round(base * 0.2) : 0;
+      const late = left < 0 ? Math.round(base * 0.25) : 0;
+      const dmgPct = Math.min(40, (m.damage || 0) * 1.5);
       const dmg = Math.round((base * dmgPct) / 100);
       const total = Math.max(0, base + bonus - late - dmg);
 
@@ -348,7 +286,6 @@
     },
 
     /* ----- caminhão ----- */
-    // Dano de colisão: reduz a condição e acumula na missão em trânsito
     damage: function (amount) {
       const d = store.data;
       d.condition = Math.max(0, d.condition - amount);
@@ -412,11 +349,10 @@
       return { ok: true, msg: 'Nome da transportadora atualizado.' };
     },
 
-    // Multiplicadores de desempenho usados pela física do caminhão
     mods: function () {
       const d = store.data;
       const u = d.upgrades;
-      const perf = d.condition < 30 ? 0.8 : 1; // caminhão muito danificado perde desempenho
+      const perf = d.condition < 30 ? 0.8 : 1;
       return {
         maxFwd: (1 + 0.08 * u.engine) * perf,
         accel: (1 + 0.10 * u.engine) * perf,
@@ -431,7 +367,6 @@
   store.data = load();
   TC.store = store;
 
-  // Salva sozinho (a cada 4 s se houve mudança) e ao sair/ocultar a aba
   setInterval(function () { if (dirty) store.save(); }, 4000);
   window.addEventListener('pagehide', store.save);
   document.addEventListener('visibilitychange', function () { if (document.hidden) store.save(); });
