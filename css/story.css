@@ -1,0 +1,47 @@
+/* ============================================================
+   TRUCK CITY - story.css  (Atualização 4.0)
+   Estilos novos: diálogo da história do porão e itens da loja.
+   Carrega DEPOIS do style.css, extra.css e fleet.css.
+   ============================================================ */
+
+/* ---------- Diálogo ---------- */
+#dlg {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 12px calc(24px + env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.35);
+  touch-action: manipulation;
+}
+
+.dlg-card {
+  width: min(620px, 100%);
+  background: rgba(12, 16, 34, 0.96);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 18px;
+  padding: 16px 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  animation: sumIn 0.2s ease-out;
+}
+
+.dlg-name { font-size: 12px; font-weight: 900; letter-spacing: 2px; margin-bottom: 6px; }
+.dlg-name.me  { color: #6aa6ff; }
+.dlg-name.npc { color: #ffcf6b; }
+.dlg-name.sys { color: #7dff9a; }
+
+#dlg-text { font-size: 17px; line-height: 1.45; min-height: 50px; }
+
+#dlg-choices { display: flex; gap: 10px; margin-top: 14px; }
+#dlg-choices .btn { flex: 1; font-size: 16px; padding: 12px; }
+
+#dlg-hint { margin-top: 10px; font-size: 12px; opacity: 0.6; text-align: right; }
+
+/* ---------- Resumo de missão especial ---------- */
+.sum-note { margin: 0 0 12px; font-size: 14px; opacity: 0.85; line-height: 1.4; }
+
+/* ---------- Loja: lista de equipamentos ---------- */
+.gear-list { display: grid; gap: 12px; }
