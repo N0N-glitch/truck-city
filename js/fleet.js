@@ -1,10 +1,10 @@
 /* ============================================================
-   TRUCK CITY - fleet.js  (Fase 4C)
-   Extensão do store (store.js continua igual):
+   TRUCK CITY - fleet.js  (Fase 4D: sem estoque)
+   Extensão do store (store.js continua separado):
    - frota: até 5 caminhões extras (além do seu)
    - comboio: quantos caminhões seguem você (visual, ver convoy.js)
    - Funcionário Responsável: despacha caminhões em segundo plano
-     (entregas automáticas e reposição de estoque)
+     (entregas automáticas dos contratos)
    - contratos de carga pesada (exigem comboio)
    Carrega DEPOIS de store.js e content.js e ANTES de pc.js.
    ============================================================ */
@@ -21,25 +21,16 @@
   const EMPLOYEE_PRICE = 60000;                           // upgrade de late-game
   const EMPLOYEE_LEVEL = 3;
   const JOB_CUT = 0.7;           // entrega automática paga 70% do contrato
-  const RESTOCK_DISCOUNT = 0.7;  // reposição por caminhão custa 70% do preço da loja
 
   /* ---------- CONTRATOS DE CARGA PESADA ----------
      heavy = total de caminhões (você + comboio). Pagam muito mais. */
   const HEAVY = [
-    { id: 'h1', client: 'Prefeitura Municipal',   title: 'Módulos de ponte (carga pesada)',  cargo: 'Módulos · 3 un',        color: '#d35400', to: 'build',     pay: 16000, time: 300, risk: 'alto', level: 3, heavy: 2 },
-    { id: 'h2', client: 'Metalúrgica Norte',      title: 'Turbinas industriais (carga pesada)', cargo: 'Turbinas · 4 un',    color: '#16a085', to: 'warehouse', pay: 24000, time: 320, risk: 'alto', level: 4, heavy: 3 },
-    { id: 'h3', client: 'Horizonte Engenharia',   title: 'Guindaste desmontado (carga pesada)', cargo: 'Guindaste · 1 conj.', color: '#f39c12', to: 'build',     pay: 38000, time: 340, risk: 'alto', level: 4, heavy: 4 },
-    { id: 'h4', client: 'Consórcio Nova Cidade',  title: 'Usina de concreto (carga pesada)',  cargo: 'Usina · 1 conjunto',   color: '#7f8c8d', to: 'build',     pay: 62000, time: 360, risk: 'alto', level: 5, heavy: 6 },
+    { id: 'h1', client: 'Prefeitura Municipal',   title: 'Módulos de ponte (carga pesada)',     cargo: 'Módulos · 3 un',       color: '#d35400', to: 'build',     pay: 16000, time: 300, risk: 'alto', level: 3, heavy: 2 },
+    { id: 'h2', client: 'Metalúrgica Norte',      title: 'Turbinas industriais (carga pesada)', cargo: 'Turbinas · 4 un',      color: '#16a085', to: 'warehouse', pay: 24000, time: 320, risk: 'alto', level: 4, heavy: 3 },
+    { id: 'h3', client: 'Horizonte Engenharia',   title: 'Guindaste desmontado (carga pesada)', cargo: 'Guindaste · 1 conj.',  color: '#f39c12', to: 'build',     pay: 38000, time: 340, risk: 'alto', level: 4, heavy: 4 },
+    { id: 'h4', client: 'Consórcio Nova Cidade',  title: 'Usina de concreto (carga pesada)',    cargo: 'Usina · 1 conjunto',   color: '#7f8c8d', to: 'build',     pay: 62000, time: 360, risk: 'alto', level: 5, heavy: 6 },
   ];
   HEAVY.forEach((c) => { if (!S.contract(c.id)) S.CONTRACTS.push(c); });
-
-  // mercadorias que cada carga pesada consome do estoque
-  Object.assign(S.CONTRACT_GOODS, {
-    h1: { steel: 30, concrete: 8 },
-    h2: { machinery: 6 },
-    h3: { machinery: 4, steel: 40 },
-    h4: { machinery: 8, concrete: 20, steel: 60 },
-  });
 
   /* ---------- ESTADO EXTRA (salvo junto com o resto) ----------
      O store.js só carrega campos que ele conhece; por isso lemos o save
@@ -53,7 +44,11 @@
     const d = S.data;
     const r = raw || {};
     d.fleet = Array.isArray(r.fleet) ? r.fleet.filter(validTruck).slice(0, MAX_FLEET) : [];
-    d.fleet.forEach((t) => { if (!t.job) t.job = null; });
+    d.fleet.forEach((t) => {
+      if (!t.job) t.job = null;
+      // viagens de reposição de estoque (sistema removido) são encerradas sem efeito
+      if (t.job && t.job.kind !== 'delivery') t.job = null;
+    });
     d.convoy = isFinite(r.convoy) ? Math.max(0, Math.min(MAX_FLEET, Math.floor(r.convoy))) : 0;
     d.employee = !!r.employee;
   }
@@ -93,7 +88,6 @@
     EMPLOYEE_PRICE: EMPLOYEE_PRICE,
     EMPLOYEE_LEVEL: EMPLOYEE_LEVEL,
     JOB_CUT: JOB_CUT,
-    RESTOCK_DISCOUNT: RESTOCK_DISCOUNT,
 
     // --- frota ---
     nextTruckPrice: function () {
@@ -162,11 +156,6 @@
       return S.idleTrucks().slice(Math.max(S.convoyLock(), S.convoyCount()));
     },
 
-    // mercadorias a caminho (reposição em andamento)
-    pendingGoods: function (id) {
-      return S.data.fleet.reduce((sum, t) => sum + (t.job && t.job.kind === 'restock' && t.job.goods[id] ? t.job.goods[id] : 0), 0);
-    },
-
     dispatchDelivery: function (contractId) {
       const d = S.data;
       const c = S.contract(contractId);
@@ -176,36 +165,12 @@
       if (c.level > S.level()) return fail('Nível da transportadora insuficiente.');
       const truck = pickTruck();
       if (!truck) return fail(noTruckMsg());
-      if (S.missingGoods(c).length) return fail('Estoque insuficiente. Compre na Loja.');
 
-      const need = S.goodsFor(c);
-      Object.keys(need).forEach((k) => { d.stock[k] = S.stockOf(k) - need[k]; });
       const dur = Math.round(c.time + 30); // tempo de viagem simulado (segundos)
-      truck.job = { kind: 'delivery', title: c.title, duration: dur, endsAt: Date.now() + dur * 1000, reward: Math.round(c.pay * JOB_CUT), goods: {} };
+      truck.job = { kind: 'delivery', title: c.title, duration: dur, endsAt: Date.now() + dur * 1000, reward: Math.round(c.pay * JOB_CUT) };
       S.touch();
       S.save();
       return { ok: true, msg: truck.name + ' saiu para: ' + c.title };
-    },
-
-    dispatchRestock: function (id, lots) {
-      const d = S.data;
-      const g = S.GOODS[id];
-      const n = Math.max(1, Math.floor(lots) || 1);
-      if (!d.employee) return fail('Contrate o Funcionário Responsável primeiro.');
-      if (!g) return fail('Mercadoria inválida.');
-      const truck = pickTruck();
-      if (!truck) return fail(noTruckMsg());
-      const qty = g.lot * n;
-      if (S.stockOf(id) + S.pendingGoods(id) + qty > g.cap) return fail('Armazém cheio para ' + g.name + ' (máx. ' + g.cap + ').');
-      const cost = Math.round(g.price * qty * RESTOCK_DISCOUNT);
-      if (!S.spend(cost, 'Reposição por caminhão: ' + g.name + ' ×' + qty)) return fail('Saldo insuficiente.');
-
-      const dur = 45 + n * 12;
-      truck.job = { kind: 'restock', title: 'Reposição de ' + g.name, duration: dur, endsAt: Date.now() + dur * 1000, reward: 0, goods: {} };
-      truck.job.goods[id] = qty;
-      S.touch();
-      S.save();
-      return { ok: true, msg: truck.name + ' foi buscar ' + g.name + ' ×' + qty };
     },
 
     // Fecha as viagens que já terminaram (roda a cada segundo e ao abrir o jogo)
@@ -216,20 +181,13 @@
       d.fleet.forEach((t) => {
         const j = t.job;
         if (!j || now < j.endsAt) return;
-        if (j.kind === 'delivery') {
-          d.money += j.reward;
-          d.earned += j.reward;
-          d.deliveries += 1;
-          S.logTx('Entrega automática: ' + j.title, j.reward);
-          d.history.unshift({ t: now, title: j.title + ' (' + t.name + ')', total: j.reward });
-          if (d.history.length > 12) d.history.length = 12;
-          TC.ui.flash(t.name + ' entregou: +' + S.fmt(j.reward), 3200);
-        } else {
-          Object.keys(j.goods).forEach((k) => {
-            d.stock[k] = Math.min(S.GOODS[k].cap, S.stockOf(k) + j.goods[k]);
-          });
-          TC.ui.flash(t.name + ' voltou com a reposição.', 3200);
-        }
+        d.money += j.reward;
+        d.earned += j.reward;
+        d.deliveries += 1;
+        S.logTx('Entrega automática: ' + j.title, j.reward);
+        d.history.unshift({ t: now, title: j.title + ' (' + t.name + ')', total: j.reward });
+        if (d.history.length > 12) d.history.length = 12;
+        TC.ui.flash(t.name + ' entregou: +' + S.fmt(j.reward), 3200);
         t.job = null;
         changed = true;
       });
